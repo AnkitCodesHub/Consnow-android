@@ -13,6 +13,8 @@ import androidx.core.app.NotificationCompat
 import com.Consnow.MainActivity
 import com.Consnow.ConsnowApp
 import kotlinx.coroutines.*
+import kotlinx.coroutines.delay
+
 
 class StepCounterService : Service(), SensorEventListener {
 
@@ -60,6 +62,22 @@ class StepCounterService : Service(), SensorEventListener {
         }
 
         restoreState()
+        startPeriodicSync() //calling the function to start periodic sync
+    }
+
+    private fun startPeriodicSync() {
+        serviceScope.launch {
+            while (true) {
+                delay(120_000) // wait for 2 minutes
+                try {
+                    val app = application as ConsnowApp //get the app instance
+                    val result = app.appContainer.stepsRepository.syncPendingToServer() //acess step repo and find all peniding recordes in room
+                    android.util.Log.d("StepSync", "Sync completed: $result")  //sync each and retrun the result
+                } catch (e: Exception) { // if not synced due to any reason skip and retry aftr 2 mins
+                    android.util.Log.e("StepSync", "Sync failed: ${e.message}")
+                }
+            }
+        }
     }
 
     override fun onSensorChanged(event: SensorEvent?) {
