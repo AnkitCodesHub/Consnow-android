@@ -34,8 +34,22 @@ class StepCounterService : Service(), SensorEventListener {
         private const val KEY_INITIAL_VALUE = "initial_sensor_value"
         private const val KEY_DATE = "sensor_date"
         private const val KEY_ACCUMULATED = "accumulated_steps"
+        //makes user idle when no movement from 3 hours
+        private const val ACTIVITY_TIMEOUT_MS = 3 * 60 * 1000L // 3mins
+//  checks every 30 seconds and update the idle time
+//  Every 30 seconds:
+//  Has it been 3+ minutes since lastStepAt?
+//    No  → user is still walking, keep isCurrentlyActive = true
+//    Yes → user stopped, set isCurrentlyActive = false
 
-        fun start(context: Context) {
+        private const val ACTIVITY_CHECK_INTERVAL_MS = 30_000L   // 30 seconds
+    }
+    private var lastStepAt: Long = 0L
+    private var isCurrentlyActive: Boolean = false
+    private var activityCheckJob: Job? = null
+
+
+    fun start(context: Context) {
             val intent = Intent(context, StepCounterService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(intent)
@@ -79,10 +93,24 @@ class StepCounterService : Service(), SensorEventListener {
             }
         }
     }
+private fun startActivityCheck() {
+    activityCheckJob?.cancel()
+    activityCheckJob = serviceScope.launch {
+        while (isActive) {
+            val now = System.currentTimeMillis()
+            isCurrentlyActive = lastStepAt > 0 && (now - lastStepAt) < ACTIVITY_TIMEOUT_MS
+            delay(ACTIVITY_CHECK_INTERVAL_MS)
+        }
+    }
+}
 
     override fun onSensorChanged(event: SensorEvent?) {
+        event ?: return
         if (event?.sensor?.type != Sensor.TYPE_STEP_COUNTER) return
-
+//        saves teh exact moment last step taken
+        lastStepAt = System.currentTimeMillis()
+//        flags if user is currently walking
+        isCurrentlyActive = true
         val totalSinceReboot = event.values[0]
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val today = java.time.LocalDate.now().toString()

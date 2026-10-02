@@ -1,6 +1,6 @@
 package com.Consnow.core.network.dto
 
-data class SyncStepsRequest(val stepCount: Int, val date: String)
+data class SyncStepsRequest(val stepCount: Int, val date: String, val isActive : Boolean = false)
 
 data class MyStepsResponse(
     val date: String,
