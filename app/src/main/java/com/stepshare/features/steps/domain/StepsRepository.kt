@@ -8,6 +8,6 @@ import kotlinx.coroutines.flow.Flow
 interface StepsRepository {
     fun observeTodaySteps(userId: String): Flow<StepRecordEntity?>
     suspend fun updateLocalSteps(userId: String, stepCount: Int)
-    suspend fun syncPendingToServer(): Result<Int>
+    suspend fun syncPendingToServer(isActive: Boolean = false): Result<Int>
     suspend fun getPeerSteps(peerId: String): Result<PeerStepsResult>
 }

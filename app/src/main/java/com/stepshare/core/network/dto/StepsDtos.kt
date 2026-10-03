@@ -13,5 +13,7 @@ data class PeerStepsResponse(
     val userName: String,
     val date: String,
     val stepCount: Int,
-    val updatedAt: String?
+    val updatedAt: String?,
+    val isActive: Boolean = false,
+    val lastActiveAt: String? = null
 )

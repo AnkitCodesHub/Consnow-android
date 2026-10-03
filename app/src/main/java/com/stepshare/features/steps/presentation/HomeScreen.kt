@@ -22,6 +22,7 @@ import com.Consnow.features.connections.domain.model.ConnectionsState
 import com.Consnow.features.connections.domain.model.PeerInfo
 import com.Consnow.features.steps.domain.model.StepsState
 import java.text.NumberFormat
+import com.Consnow.ui.components.ActivityRipple
 
 @Composable
 fun HomeScreen(
@@ -62,11 +63,16 @@ fun HomeScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            Text(
-                text = NumberFormat.getNumberInstance().format(stepsState.todaySteps),
-                style = MaterialTheme.typography.displayLarge,
+            ActivityRipple(
+                isActive = stepsState.isActive, // from ViewModel
                 color = MaterialTheme.colorScheme.primary
-            )
+            ) {
+                Text(
+                    text = NumberFormat.getNumberInstance().format(stepsState.todaySteps),
+                    style = MaterialTheme.typography.displayLarge,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            }
 
             Spacer(Modifier.height(12.dp))
 

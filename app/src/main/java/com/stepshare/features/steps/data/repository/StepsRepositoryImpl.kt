@@ -48,7 +48,7 @@ class StepsRepositoryImpl(
         }
     }
 
-    override suspend fun syncPendingToServer(): Result<Int> {
+    override suspend fun syncPendingToServer(isActive: Boolean): Result<Int> {
         val pending = stepRecordDao.getRecordsByStatus(SyncStatus.PENDING)
         if (pending.isEmpty()) return Result.Success(0)
 
@@ -56,7 +56,7 @@ class StepsRepositoryImpl(
         for (record in pending) {
             try {
                 val response = apiService.syncSteps(
-                    SyncStepsRequest(stepCount = record.stepCount, date = record.date)
+                    SyncStepsRequest(stepCount = record.stepCount, date = record.date,isActive = isActive)
                 )
                 if (response.isSuccessful) {
                     stepRecordDao.updateSyncStatus(record.id, SyncStatus.SYNCED)
@@ -72,7 +72,7 @@ class StepsRepositoryImpl(
             val response = apiService.getPeerSteps(peerId, today())
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
-                Result.Success(PeerStepsResult(body.userName, body.stepCount, body.date))
+                Result.Success(PeerStepsResult(body.userName, body.stepCount, body.date,body.isActive,body.date))
             } else {
                 Result.Error("Could not load steps")
             }
@@ -87,5 +87,7 @@ class StepsRepositoryImpl(
 data class PeerStepsResult(
     val userName: String,
     val stepCount: Int,
-    val date: String
+    val date: String,
+    val isActive: Boolean = false,
+    val lastActiveAt: String? = null
 )

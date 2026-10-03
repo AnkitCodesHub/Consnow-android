@@ -1,3 +1,14 @@
+//App calls                    →  HTTP request sent to backend
+//─────────────────────────────────────────────────────────
+//register(body)               →  POST   /auth/register
+//login(body)                  →  POST   /auth/login
+//createConnection(body)       →  POST   /connections
+//getConnections()             →  GET    /connections
+//syncSteps(body)              →  PUT    /steps/sync
+//getMySteps(date)             →  GET    /steps/me?date=2026-10-04
+//getPeerSteps(userId, date)   →  GET    /steps/user/abc123?date=2026-10-04
+
+//edited :- 04/10/2026 by Ankit
 package com.Consnow.core.network.api
 
 import com.Consnow.core.network.dto.*

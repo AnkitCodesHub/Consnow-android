@@ -1,3 +1,20 @@
+//Phone step sensor
+//      ↓
+//onSensorChanged()
+//      ↓
+//Get total steps since phone reboot
+//      ↓
+//Calculate today's steps using baseline
+//      ↓
+//Save today's steps to Room
+//      ↓
+//Update notification
+//      ↓
+//Every 2 minutes → sync local data to backend
+//New day detected (savedDate != today)
+//  → Reset baseline to current sensor value
+//  → Steps start from 0 again
+//edited: 04/10/2026 by Ankit
 package com.Consnow.features.steps.data.sensor
 
 import android.app.*
@@ -34,7 +51,7 @@ class StepCounterService : Service(), SensorEventListener {
         private const val KEY_INITIAL_VALUE = "initial_sensor_value"
         private const val KEY_DATE = "sensor_date"
         private const val KEY_ACCUMULATED = "accumulated_steps"
-        //makes user idle when no movement from 3 hours
+        //makes user idle when no movement from 3 mins
         private const val ACTIVITY_TIMEOUT_MS = 3 * 60 * 1000L // 3mins
 //  checks every 30 seconds and update the idle time
 //  Every 30 seconds:
@@ -43,12 +60,6 @@ class StepCounterService : Service(), SensorEventListener {
 //    Yes → user stopped, set isCurrentlyActive = false
 
         private const val ACTIVITY_CHECK_INTERVAL_MS = 30_000L   // 30 seconds
-    }
-    private var lastStepAt: Long = 0L
-    private var isCurrentlyActive: Boolean = false
-    private var activityCheckJob: Job? = null
-
-
     fun start(context: Context) {
             val intent = Intent(context, StepCounterService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -62,6 +73,9 @@ class StepCounterService : Service(), SensorEventListener {
             context.stopService(Intent(context, StepCounterService::class.java))
         }
     }
+private var lastStepAt: Long = 0L
+private var isCurrentlyActive: Boolean = false
+private var activityCheckJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -77,6 +91,7 @@ class StepCounterService : Service(), SensorEventListener {
 
         restoreState()
         startPeriodicSync() //calling the function to start periodic sync
+        startActivityCheck() //flips is active to false
     }
 
     private fun startPeriodicSync() {
@@ -85,7 +100,7 @@ class StepCounterService : Service(), SensorEventListener {
                 delay(120_000) // wait for 2 minutes
                 try {
                     val app = application as ConsnowApp //get the app instance
-                    val result = app.appContainer.stepsRepository.syncPendingToServer() //acess step repo and find all peniding recordes in room
+                    val result = app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive) //acess step repo and find all peniding recordes in room
                     android.util.Log.d("StepSync", "Sync completed: $result")  //sync each and retrun the result
                 } catch (e: Exception) { // if not synced due to any reason skip and retry aftr 2 mins
                     android.util.Log.e("StepSync", "Sync failed: ${e.message}")
@@ -96,8 +111,11 @@ class StepCounterService : Service(), SensorEventListener {
 private fun startActivityCheck() {
     activityCheckJob?.cancel()
     activityCheckJob = serviceScope.launch {
+//        check if coroutine is active
         while (isActive) {
+//            gives current times in milliseconds
             val now = System.currentTimeMillis()
+//            determine whether user is active or not get the current time and check how long ago the user's last step happenend
             isCurrentlyActive = lastStepAt > 0 && (now - lastStepAt) < ACTIVITY_TIMEOUT_MS
             delay(ACTIVITY_CHECK_INTERVAL_MS)
         }
