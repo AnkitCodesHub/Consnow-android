@@ -72,7 +72,7 @@ class StepsRepositoryImpl(
             val response = apiService.getPeerSteps(peerId, today())
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
-                Result.Success(PeerStepsResult(body.userName, body.stepCount, body.date,body.isActive,body.date))
+                Result.Success(PeerStepsResult(body.userName, body.stepCount, body.date,body.isActive,body.lastActiveAt))
             } else {
                 Result.Error("Could not load steps")
             }

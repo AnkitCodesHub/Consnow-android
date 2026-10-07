@@ -14,7 +14,7 @@ android {
         targetSdk = 34
         versionCode = 1
         versionName = "1.0.0"
-        buildConfigField("String", "API_BASE_URL", "\"http://10.57.153.15:3000/\"")
+        buildConfigField("String", "API_BASE_URL", "\"https://consnow-backend.onrender.com/\"")
     }
 
     buildFeatures {
