@@ -44,6 +44,7 @@ class StepCounterService : Service(), SensorEventListener {
     private var initialSensorValue: Float? = null
     private var lastSavedCount: Int = 0
 
+
     companion object {
         const val CHANNEL_ID = "step_counter_channel"
         const val NOTIFICATION_ID = 1
@@ -59,7 +60,7 @@ class StepCounterService : Service(), SensorEventListener {
 //    No  → user is still walking, keep isCurrentlyActive = true
 //    Yes → user stopped, set isCurrentlyActive = false
 
-        private const val ACTIVITY_CHECK_INTERVAL_MS = 30_000L   // 30 seconds
+        private const val ACTIVITY_CHECK_INTERVAL_MS = 15_000L   // 15 seconds
     fun start(context: Context) {
             val intent = Intent(context, StepCounterService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -76,6 +77,11 @@ class StepCounterService : Service(), SensorEventListener {
 private var lastStepAt: Long = 0L
 private var isCurrentlyActive: Boolean = false
 private var activityCheckJob: Job? = null
+
+private var syncDebounceJob: Job? = null //scheduled sync coroutine so you can cancel and replace it when another update arrives.
+
+    private var lastSyncTime: Long = 0L
+
 
     override fun onCreate() {
         super.onCreate()
@@ -97,7 +103,7 @@ private var activityCheckJob: Job? = null
     private fun startPeriodicSync() {
         serviceScope.launch {
             while (true) {
-                delay(120_000) // wait for 2 minutes
+                delay(15_000) // wait for 2 minutes
                 try {
                     val app = application as ConsnowApp //get the app instance
                     val result = app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive) //acess step repo and find all peniding recordes in room
@@ -159,15 +165,46 @@ private fun startActivityCheck() {
         }
     }
 
-    private fun persistSteps(count: Int) {
+// Step 1 → save to Room → start 2s timer
+//Step 2 (0.5s later) → save to Room → CANCEL old timer → start new 2s timer
+//Step 3 (0.8s later) → save to Room → CANCEL old timer → start new 2s timer
+//... walking continues, timer keeps resetting ...
+//Last step → save to Room → start 2s timer
+//... no more steps ...
+//2 seconds pass → timer fires → SYNC to backend
+private fun persistSteps(count: Int) {
+    serviceScope.launch {
+        try {
+            val app = application as ConsnowApp
+            val userId = app.appContainer.tokenManager.getUserId() ?: return@launch
+            app.appContainer.stepsRepository.updateLocalSteps(userId, count)
+        } catch (_: Exception) { }
+    }
+
+    val now = System.currentTimeMillis()
+    if (now - lastSyncTime > 1_000) {
+        // Immediate sync, max once per second
+        lastSyncTime = now
+        syncDebounceJob?.cancel()
         serviceScope.launch {
             try {
                 val app = application as ConsnowApp
-                val userId = app.appContainer.tokenManager.getUserId() ?: return@launch
-                app.appContainer.stepsRepository.updateLocalSteps(userId, count)
+                app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive)
+            } catch (_: Exception) { }
+        }
+    } else {
+        // Trailing sync for when walking pauses
+        syncDebounceJob?.cancel()
+        syncDebounceJob = serviceScope.launch {
+            delay(1_000)
+            lastSyncTime = System.currentTimeMillis()
+            try {
+                val app = application as ConsnowApp
+                app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive)
             } catch (_: Exception) { }
         }
     }
+}
 
     private fun restoreState() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)

@@ -22,24 +22,38 @@ class PeerStepsViewModel(
 
     init { loadPeerSteps() }
 
+    private var isInitialLoad = true
+
     fun loadPeerSteps() {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true, error = null) }
+            if (isInitialLoad) {
+                _state.update { it.copy(isLoading = true, error = null) }
+            }
             when (val result = getPeerStepsUseCase(peerId)) {
-                is Result.Success -> _state.update {
-                    it.copy(isLoading = false, peerName = result.data.userName, stepCount = result.data.stepCount,isActive = result.data.isActive,
-                        lastActiveAt  =result.data.lastActiveAt)
+                is Result.Success -> {
+                    isInitialLoad = false
+                    _state.update {
+                        it.copy(isLoading = false, peerName = result.data.userName, stepCount = result.data.stepCount, isActive = result.data.isActive,
+                            lastActiveAt = result.data.lastActiveAt, error = null)
+                    }
                 }
-                is Result.Error -> _state.update { it.copy(isLoading = false, error = result.message) }
+                is Result.Error -> {
+                    if (isInitialLoad) {
+                        _state.update { it.copy(isLoading = false, error = result.message) }
+                    }
+                }
                 else -> {}
             }
         }
     }
+    private var refreshStarted = false
 
     fun startAutoRefresh() {
+        if (refreshStarted) return
+        refreshStarted = true
         viewModelScope.launch {
             while (true) {
-                delay(30_000)
+                delay(5_000)
                 loadPeerSteps()
             }
         }
