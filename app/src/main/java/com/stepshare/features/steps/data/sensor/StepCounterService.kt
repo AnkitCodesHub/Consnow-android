@@ -53,7 +53,7 @@ class StepCounterService : Service(), SensorEventListener {
         private const val KEY_DATE = "sensor_date"
         private const val KEY_ACCUMULATED = "accumulated_steps"
         //makes user idle when no movement from 3 mins
-        private const val ACTIVITY_TIMEOUT_MS = 3 * 60 * 1000L // 3mins
+        private const val ACTIVITY_TIMEOUT_MS =  60 * 1000L // 60 secs of inactivity count as inactiveand update last movement status
 //  checks every 30 seconds and update the idle time
 //  Every 30 seconds:
 //  Has it been 3+ minutes since lastStepAt?
