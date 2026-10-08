@@ -21,8 +21,9 @@ import com.Consnow.core.database.entity.SyncStatus
 import com.Consnow.features.connections.domain.model.ConnectionsState
 import com.Consnow.features.connections.domain.model.PeerInfo
 import com.Consnow.features.steps.domain.model.StepsState
-import java.text.NumberFormat
-import com.Consnow.ui.components.ActivityRipple
+//import java.text.NumberFormat
+//import com.Consnow.ui.components.ActivityRipple
+import com.Consnow.ui.components.StepCard
 
 @Composable
 fun HomeScreen(
@@ -63,16 +64,10 @@ fun HomeScreen(
 
             Spacer(Modifier.height(8.dp))
 
-            ActivityRipple(
-                isActive = stepsState.isActive, // from ViewModel
-                color = MaterialTheme.colorScheme.primary
-            ) {
-                Text(
-                    text = NumberFormat.getNumberInstance().format(stepsState.todaySteps),
-                    style = MaterialTheme.typography.displayLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
+            StepCard(
+                stepCount = stepsState.todaySteps,
+                isActive = stepsState.isActive
+            )
 
             Spacer(Modifier.height(12.dp))
 

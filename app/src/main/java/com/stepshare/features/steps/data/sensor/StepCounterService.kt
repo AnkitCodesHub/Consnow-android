@@ -52,6 +52,8 @@ class StepCounterService : Service(), SensorEventListener {
         private const val KEY_INITIAL_VALUE = "initial_sensor_value"
         private const val KEY_DATE = "sensor_date"
         private const val KEY_ACCUMULATED = "accumulated_steps"
+            const val SYNC_INTERVAL_MS = 1_000L
+            const val SYNC_DEBOUNCE_MS = 1_000L
         //makes user idle when no movement from 3 mins
         private const val ACTIVITY_TIMEOUT_MS =  60 * 1000L // 60 secs of inactivity count as inactiveand update last movement status
 //  checks every 30 seconds and update the idle time
@@ -80,7 +82,7 @@ private var activityCheckJob: Job? = null
 
 private var syncDebounceJob: Job? = null //scheduled sync coroutine so you can cancel and replace it when another update arrives.
 
-    private var lastSyncTime: Long = 0L
+//    private var lastSyncTime: Long = 0L
 
 
     override fun onCreate() {
@@ -172,39 +174,127 @@ private fun startActivityCheck() {
 //Last step → save to Room → start 2s timer
 //... no more steps ...
 //2 seconds pass → timer fires → SYNC to backend
+//private fun persistSteps(count: Int) {
+//    serviceScope.launch {
+//        try {
+//            val app = application as ConsnowApp
+//            val userId = app.appContainer.tokenManager.getUserId() ?: return@launch
+//            app.appContainer.stepsRepository.updateLocalSteps(userId, count)
+//        } catch (_: Exception) { }
+//    }
+//
+//    val now = System.currentTimeMillis()
+//    if (now - lastSyncTime > 1_000) {
+//        // Immediate sync, max once per second
+//        lastSyncTime = now
+//        syncDebounceJob?.cancel()
+//        serviceScope.launch {
+//            try {
+//                val app = application as ConsnowApp
+//                app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive)
+//            } catch (_: Exception) { }
+//        }
+//    } else {
+//        // Trailing sync for when walking pauses
+//        syncDebounceJob?.cancel()
+//        syncDebounceJob = serviceScope.launch {
+//            delay(1_000)
+//            lastSyncTime = System.currentTimeMillis()
+//            try {
+//                val app = application as ConsnowApp
+//                app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive)
+//            } catch (_: Exception) { }
+//        }
+//    }
+//}
+//  the three functions below -divide the job into three seperate responsibilities
+
+//    persiststeps - save the latest tep count locally
 private fun persistSteps(count: Int) {
+
     serviceScope.launch {
         try {
             val app = application as ConsnowApp
-            val userId = app.appContainer.tokenManager.getUserId() ?: return@launch
-            app.appContainer.stepsRepository.updateLocalSteps(userId, count)
-        } catch (_: Exception) { }
-    }
 
-    val now = System.currentTimeMillis()
-    if (now - lastSyncTime > 1_000) {
-        // Immediate sync, max once per second
-        lastSyncTime = now
-        syncDebounceJob?.cancel()
-        serviceScope.launch {
-            try {
-                val app = application as ConsnowApp
-                app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive)
-            } catch (_: Exception) { }
-        }
-    } else {
-        // Trailing sync for when walking pauses
-        syncDebounceJob?.cancel()
-        syncDebounceJob = serviceScope.launch {
-            delay(1_000)
-            lastSyncTime = System.currentTimeMillis()
-            try {
-                val app = application as ConsnowApp
-                app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive)
-            } catch (_: Exception) { }
+            val userId = app.appContainer.tokenManager
+                .getUserId()
+                ?: return@launch
+
+            // 1. Always save latest steps locally first
+            app.appContainer.stepsRepository
+                .updateLocalSteps(userId, count)
+
+            // 2. Schedule network synchronization
+            scheduleSync()
+
+        } catch (_: CancellationException) {
+            throw CancellationException()
+        } catch (_: Exception) {
+            // Don't crash the service
         }
     }
 }
+//    private var syncDebounceJob: Job? = null
+    private var syncJob: Job? = null
+
+    private var lastSyncTime = 0L
+
+
+//    added to fix the latency issue
+
+//    decides when the server should be updated
+    private fun scheduleSync() {
+
+        val now = System.currentTimeMillis()
+
+        if (now - lastSyncTime >= SYNC_INTERVAL_MS) {
+
+            syncDebounceJob?.cancel()
+            syncDebounceJob = null
+
+            lastSyncTime = now
+
+            startSync()
+
+        } else {
+
+            syncDebounceJob?.cancel()
+
+            syncDebounceJob = serviceScope.launch {
+
+                delay(SYNC_DEBOUNCE_MS)
+
+                lastSyncTime = System.currentTimeMillis()
+
+                startSync()
+            }
+        }
+    }
+//    added my ankit to fix sync issue
+
+//    performs the server synchronisations
+    private fun startSync() {
+
+        if (syncJob?.isActive == true) {
+            return
+        }
+
+        syncJob = serviceScope.launch {
+
+            try {
+                val app = application as ConsnowApp
+
+                app.appContainer.stepsRepository
+                    .syncPendingToServer(isCurrentlyActive)
+
+            } catch (_: CancellationException) {
+                throw CancellationException()
+
+            } catch (_: Exception) {
+                // Leave data pending for the next sync attempt
+            }
+        }
+    }
 
     private fun restoreState() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
