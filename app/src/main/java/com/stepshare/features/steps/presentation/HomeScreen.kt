@@ -24,6 +24,7 @@ import com.Consnow.features.steps.domain.model.StepsState
 //import java.text.NumberFormat
 //import com.Consnow.ui.components.ActivityRipple
 import com.Consnow.ui.components.StepCard
+import com.Consnow.features.steps.presentation.formatTimeAgo
 
 @Composable
 fun HomeScreen(
@@ -92,6 +93,15 @@ fun HomeScreen(
                 )
             }
 
+            Spacer(Modifier.height(12.dp))
+//            Last Active At
+            Text(
+                text = if (stepsState.isActive) "🚶 Walking"
+                else "Last moved ${stepsState.lastActiveAt?.let { formatTimeAgo(it) } ?: "Unknown"}",
+                style = MaterialTheme.typography.labelSmall,
+                color = if (stepsState.isActive) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant
+            )
             Spacer(Modifier.height(12.dp))
 
             // Connection code

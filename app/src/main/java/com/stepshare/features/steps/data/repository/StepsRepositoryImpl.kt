@@ -10,6 +10,7 @@ import com.Consnow.features.steps.domain.StepsRepository
 import kotlinx.coroutines.flow.Flow
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import com.Consnow.features.steps.domain.MyStepsResult
 
 class StepsRepositoryImpl(
     private val stepRecordDao: StepRecordDao,
@@ -72,7 +73,15 @@ class StepsRepositoryImpl(
             val response = apiService.getPeerSteps(peerId, today())
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
-                Result.Success(PeerStepsResult(body.userName, body.stepCount, body.date,body.isActive,body.lastActiveAt))
+                Result.Success(
+                    PeerStepsResult(
+                        body.userName,
+                        body.stepCount,
+                        body.date,
+                        body.isActive,
+                        body.lastActiveAt
+                    )
+                )
             } else {
                 Result.Error("Could not load steps")
             }
@@ -80,6 +89,20 @@ class StepsRepositoryImpl(
             Result.Error(e.message ?: "Network error")
         }
     }
+        override suspend fun getMySteps(date: String): MyStepsResult? {
+            return try {
+                val response = apiService.getMySteps(date)
+                if (response.isSuccessful && response.body() != null) {
+                    val body = response.body()!!
+                    MyStepsResult(
+                        date = body.date,
+                        stepCount = body.stepCount,
+                        isActive = body.isActive,
+                        lastActiveAt = body.lastActiveAt
+                    )
+                } else null
+            } catch (_: Exception) { null }
+        }
 
     private fun today(): String = LocalDate.now().format(dateFormatter)
 }

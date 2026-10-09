@@ -52,6 +52,7 @@ class StepCounterService : Service(), SensorEventListener {
         private const val KEY_INITIAL_VALUE = "initial_sensor_value"
         private const val KEY_DATE = "sensor_date"
         private const val KEY_ACCUMULATED = "accumulated_steps"
+        private const val KEY_LAST_STEP_AT = "last_step_at"
             const val SYNC_INTERVAL_MS = 1_000L
             const val SYNC_DEBOUNCE_MS = 1_000L
         //makes user idle when no movement from 3 mins
@@ -123,12 +124,19 @@ private fun startActivityCheck() {
         while (isActive) {
 //            gives current times in milliseconds
             val now = System.currentTimeMillis()
+            val wasActive = isCurrentlyActive
 //            determine whether user is active or not get the current time and check how long ago the user's last step happenend
             isCurrentlyActive = lastStepAt > 0 && (now - lastStepAt) < ACTIVITY_TIMEOUT_MS
+
+            // Flip detected: was walking, now idle → force sync
+            if (wasActive && !isCurrentlyActive) {
+                startSync()
+            }
             delay(ACTIVITY_CHECK_INTERVAL_MS)
         }
     }
 }
+
 
     override fun onSensorChanged(event: SensorEvent?) {
         event ?: return
@@ -137,11 +145,13 @@ private fun startActivityCheck() {
         lastStepAt = System.currentTimeMillis()
 //        flags if user is currently walking
         isCurrentlyActive = true
+//        for showing last active on my screen also date - 09/oct
+
         val totalSinceReboot = event.values[0]
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val today = java.time.LocalDate.now().toString()
         val savedDate = prefs.getString(KEY_DATE, null)
-
+ prefs.edit().putLong(KEY_LAST_STEP_AT, lastStepAt).apply()
         if (savedDate != today) {
             // New day: reset baseline
             initialSensorValue = totalSinceReboot

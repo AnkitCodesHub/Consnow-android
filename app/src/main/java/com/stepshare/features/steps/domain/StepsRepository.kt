@@ -10,4 +10,12 @@ interface StepsRepository {
     suspend fun updateLocalSteps(userId: String, stepCount: Int)
     suspend fun syncPendingToServer(isActive: Boolean = false): Result<Int>
     suspend fun getPeerSteps(peerId: String): Result<PeerStepsResult>
+
+    suspend fun getMySteps(date: String): MyStepsResult?
 }
+data class MyStepsResult(
+    val date: String,
+    val stepCount: Int,
+    val isActive: Boolean,
+    val lastActiveAt: String?
+)

@@ -5,7 +5,9 @@ data class SyncStepsRequest(val stepCount: Int, val date: String, val isActive :
 data class MyStepsResponse(
     val date: String,
     val stepCount: Int,
-    val updatedAt: String?
+    val updatedAt: String?,
+    val isActive: Boolean = false,
+    val lastActiveAt: String? = null
 )
 
 data class PeerStepsResponse(

@@ -8,6 +8,7 @@ data class StepsState(
     val sensorAvailable: Boolean = true,
     val permissionGranted: Boolean = false,
     val isActive: Boolean = false,
+    val lastActiveAt: String? = null,
 )
 
 data class PeerStepsState(

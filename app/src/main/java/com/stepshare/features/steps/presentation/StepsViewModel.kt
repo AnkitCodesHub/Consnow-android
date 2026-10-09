@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import com.Consnow.ConsnowApp
 
 class StepsViewModel(
     private val application: Application,
@@ -38,6 +39,7 @@ class StepsViewModel(
     init {
         checkSensor()
         observeSteps()
+        observeLastActiveAt()
     }
 
     private fun checkSensor() {
@@ -78,6 +80,23 @@ private var lastObservedCount = 0//var to rem prev step count
                         _state.update { it.copy(isActive = false) }//withoutthis there is no mech to turn of ripple
                     }
                 }
+            }
+        }
+    }
+//This function continuously checks the server for the user's latest activity time and updates the UI every 15 seconds.
+//    now polls from the server
+    private fun observeLastActiveAt() {
+        viewModelScope.launch {
+            while (true) {
+                try {
+                    val app = application as ConsnowApp
+                    val today = java.time.LocalDate.now().toString()
+                    val response = app.appContainer.stepsRepository.getMySteps(today)
+                    if (response != null) {
+                        _state.update { it.copy(lastActiveAt = response.lastActiveAt) }
+                    }
+                } catch (_: Exception) { }
+                delay(15_000)
             }
         }
     }

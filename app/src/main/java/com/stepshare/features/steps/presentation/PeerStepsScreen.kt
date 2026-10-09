@@ -233,4 +233,16 @@ fun formatTimeAgo(isoTimestamp: String): String {
     } catch (e: Exception) {
         "Unknown"
     }
+
+}
+fun formatTimeAgoFromMillis(timestamp: Long): String {
+    val diffMs = System.currentTimeMillis() - timestamp
+    val minutes = diffMs / 60_000
+    val hours = minutes / 60
+    return when {
+        minutes < 1 -> "just now"
+        minutes < 60 -> "${minutes}m ago"
+        hours < 24 -> "${hours}h ago"
+        else -> "${hours / 24}d ago"
+    }
 }
