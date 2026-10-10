@@ -36,6 +36,9 @@ class StepsViewModel(
     private val _state = MutableStateFlow(StepsState())
     val state = _state.asStateFlow()
 
+
+
+
     init {
         checkSensor()
         observeSteps()
@@ -85,21 +88,31 @@ private var lastObservedCount = 0//var to rem prev step count
     }
 //This function continuously checks the server for the user's latest activity time and updates the UI every 15 seconds.
 //    now polls from the server
-    private fun observeLastActiveAt() {
-        viewModelScope.launch {
-            while (true) {
-                try {
-                    val app = application as ConsnowApp
-                    val today = java.time.LocalDate.now().toString()
-                    val response = app.appContainer.stepsRepository.getMySteps(today)
-                    if (response != null) {
-                        _state.update { it.copy(lastActiveAt = response.lastActiveAt) }
+private fun observeLastActiveAt() {
+    viewModelScope.launch {
+        val prefs = application.getSharedPreferences("consnow_prefs", Context.MODE_PRIVATE)
+        while (true) {
+            try {
+                val app = application as ConsnowApp
+                val today = java.time.LocalDate.now().toString()
+                val response = app.appContainer.stepsRepository.getMySteps(today)
+                if (response != null) {
+                    val lastActiveAt = response.lastActiveAt
+                    if (lastActiveAt != null) {
+                        // Cache it — survives midnight rollover
+                        prefs.edit().putString("last_active_at", lastActiveAt).apply()
+                        _state.update { it.copy(lastActiveAt = lastActiveAt) }
+                    } else {
+                        // New day, no record yet — fall back to cached value
+                        val cached = prefs.getString("last_active_at", null)
+                        _state.update { it.copy(lastActiveAt = cached) }
                     }
-                } catch (_: Exception) { }
-                delay(15_000)
-            }
+                }
+            } catch (_: Exception) { }
+            delay(15_000)
         }
     }
+}
 
     fun onPermissionGranted() {
         _state.update { it.copy(permissionGranted = true) }

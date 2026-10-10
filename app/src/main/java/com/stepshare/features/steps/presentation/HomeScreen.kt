@@ -25,6 +25,8 @@ import com.Consnow.features.steps.domain.model.StepsState
 //import com.Consnow.ui.components.ActivityRipple
 import com.Consnow.ui.components.StepCard
 import com.Consnow.features.steps.presentation.formatTimeAgo
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun HomeScreen(
@@ -95,13 +97,18 @@ fun HomeScreen(
 
             Spacer(Modifier.height(12.dp))
 //            Last Active At
-            Text(
-                text = if (stepsState.isActive) "🚶 Walking"
-                else "Last moved ${stepsState.lastActiveAt?.let { formatTimeAgo(it) } ?: "Unknown"}",
-                style = MaterialTheme.typography.labelSmall,
-                color = if (stepsState.isActive) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Box(modifier = Modifier.height(20.dp), contentAlignment = Alignment.CenterStart) {
+                Text(
+                    text = if (stepsState.isActive) "🚶 Walking"
+                    else "Last moved ${stepsState.lastActiveAt?.let { formatTimeAgo(it) } ?: "Unknown"}",
+                    style = MaterialTheme.typography.labelSmall.copy(
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = if (stepsState.isActive) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
             Spacer(Modifier.height(12.dp))
 
             // Connection code
@@ -122,7 +129,7 @@ fun HomeScreen(
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
-                    modifier = Modifier.padding(horizontal = 32.dp)
+                    modifier = Modifier.padding(horizontal = 20.dp)
                 )
             }
 

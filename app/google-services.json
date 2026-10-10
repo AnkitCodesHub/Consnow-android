@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "885445648272",
+    "project_id": "consnow",
+    "storage_bucket": "consnow.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:885445648272:android:c07fd9e8390307a1685d15",
+        "android_client_info": {
+          "package_name": "com.Consnow"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyClSrAC7Wv5f887Sw21EWzGTbLtOfHUnsQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
