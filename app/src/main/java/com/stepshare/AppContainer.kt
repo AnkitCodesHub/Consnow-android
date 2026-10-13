@@ -71,7 +71,7 @@ class AppContainer(context: Context) {
     // ── Repositories (exposed as interfaces) ─────────────
 
     val authRepository: AuthRepository by lazy {
-        AuthRepositoryImpl(apiService, tokenManager)
+        AuthRepositoryImpl(apiService, tokenManager, context)
     }
 
     val connectionsRepository: ConnectionsRepository by lazy {

@@ -1,11 +1,11 @@
 package com.Consnow
 
+import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
-import android.content.Intent
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -13,13 +13,27 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
+import androidx.lifecycle.lifecycleScope
 import com.Consnow.navigation.ConsnowNavHost
 import com.Consnow.ui.theme.ConsnowTheme
+import com.google.firebase.analytics.FirebaseAnalytics
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+
+        // Firebase user tracking
+        val container = (application as ConsnowApp).appContainer
+        lifecycleScope.launch {
+            val userId = container.tokenManager.getUserId()
+            if (userId != null) {
+                FirebaseAnalytics.getInstance(this@MainActivity).setUserId(userId)
+            }
+        }
+
         setContent {
             ConsnowTheme {
                 Surface(

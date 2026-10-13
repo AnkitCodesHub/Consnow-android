@@ -6,10 +6,13 @@ import com.Consnow.core.network.api.ApiService
 import com.Consnow.core.network.dto.LoginRequest
 import com.Consnow.core.network.dto.RegisterRequest
 import com.Consnow.features.auth.domain.AuthRepository
+import android.content.Context
+import com.google.firebase.analytics.FirebaseAnalytics
 
 class AuthRepositoryImpl(
     private val apiService: ApiService,
-    private val tokenManager: TokenManager
+    private val tokenManager: TokenManager,
+    private val context: Context
 ) : AuthRepository {
 
     override suspend fun register(name: String, email: String, password: String): Result<Unit> {
@@ -23,6 +26,11 @@ class AuthRepositoryImpl(
                     userName = body.user.name,
                     connectionCode = body.user.connectionCode
                 )
+                FirebaseAnalytics.getInstance(context).apply {
+                    setUserId(body.user.id)
+                    setUserProperty("name", body.user.name)
+                    setUserProperty("email", email)
+                }
                 Result.Success(Unit)
             } else {
                 Result.Error(response.errorBody()?.string() ?: "Registration failed", response.code())
@@ -43,6 +51,13 @@ class AuthRepositoryImpl(
                     userName = body.user.name,
                     connectionCode = body.user.connectionCode
                 )
+
+                // for getting analytics on google firebase
+                FirebaseAnalytics.getInstance(context).apply {
+                    setUserId(body.user.id)
+                    setUserProperty("name", body.user.name)
+                    setUserProperty("email", email)
+                }
                 Result.Success(Unit)
             } else {
                 Result.Error(response.errorBody()?.string() ?: "Login failed", response.code())
@@ -54,6 +69,7 @@ class AuthRepositoryImpl(
 
     override suspend fun logout() {
         tokenManager.clearSession()
+        FirebaseAnalytics.getInstance(context).setUserId(null)
     }
 
     override suspend fun isLoggedIn(): Boolean = tokenManager.getToken() != null
