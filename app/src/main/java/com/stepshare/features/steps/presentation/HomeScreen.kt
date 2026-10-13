@@ -15,18 +15,16 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.Consnow.core.database.entity.SyncStatus
 import com.Consnow.features.connections.domain.model.ConnectionsState
 import com.Consnow.features.connections.domain.model.PeerInfo
 import com.Consnow.features.steps.domain.model.StepsState
-//import java.text.NumberFormat
-//import com.Consnow.ui.components.ActivityRipple
+import com.Consnow.ui.components.LockStatusWidget
 import com.Consnow.ui.components.StepCard
-import com.Consnow.features.steps.presentation.formatTimeAgo
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.sp
 
 @Composable
 fun HomeScreen(
@@ -36,7 +34,9 @@ fun HomeScreen(
     onSync: () -> Unit,
     onPeerClick: (PeerInfo) -> Unit,
     onConnectClick: () -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    ownIsLocked: Boolean = true,
+    ownLastUnlockedAtMs: Long = 0L,
 ) {
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
@@ -57,7 +57,6 @@ fun HomeScreen(
         horizontalAlignment = Alignment.CenterHorizontally,
         contentPadding = PaddingValues(top = 64.dp, bottom = 32.dp)
     ) {
-        // Step count display
         item {
             Text(
                 text = "Today's Steps",
@@ -96,7 +95,8 @@ fun HomeScreen(
             }
 
             Spacer(Modifier.height(12.dp))
-//            Last Active At
+
+            // Last active
             Box(modifier = Modifier.height(20.dp), contentAlignment = Alignment.CenterStart) {
                 Text(
                     text = if (stepsState.isActive) "🚶 Walking"
@@ -109,6 +109,16 @@ fun HomeScreen(
                     else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
+
+            Spacer(Modifier.height(12.dp))
+
+            // Lock status widget — shows own phone lock state
+            LockStatusWidget(
+                isLocked = ownIsLocked,
+                lastUnlockedAtMs = ownLastUnlockedAtMs,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
             Spacer(Modifier.height(12.dp))
 
             // Connection code
@@ -116,7 +126,7 @@ fun HomeScreen(
                 Text(
                     text = "Your code",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Text(
                     text = connectionsState.myConnectionCode,
@@ -135,19 +145,14 @@ fun HomeScreen(
 
             Spacer(Modifier.height(32.dp))
 
-            // Connected peers section
+            // Connected peers section header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Connected",
-                    style = MaterialTheme.typography.titleLarge
-                )
-                TextButton(onClick = onConnectClick) {
-                    Text("Add")
-                }
+                Text(text = "Connected", style = MaterialTheme.typography.titleLarge)
+                TextButton(onClick = onConnectClick) { Text("Add") }
             }
 
             Spacer(Modifier.height(8.dp))
@@ -201,7 +206,6 @@ private fun PeerCard(peer: PeerInfo, onClick: () -> Unit) {
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Avatar circle
             Box(
                 modifier = Modifier
                     .size(40.dp)
@@ -215,9 +219,7 @@ private fun PeerCard(peer: PeerInfo, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.primary
                 )
             }
-
             Spacer(Modifier.width(16.dp))
-
             Column(modifier = Modifier.weight(1f)) {
                 Text(text = peer.name, style = MaterialTheme.typography.bodyLarge)
                 Text(
@@ -226,7 +228,6 @@ private fun PeerCard(peer: PeerInfo, onClick: () -> Unit) {
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
-
             Text(
                 text = "→",
                 style = MaterialTheme.typography.titleLarge,

@@ -57,18 +57,22 @@ fun ConsnowNavHost() {
                 factory = StepsViewModel.Factory(
                     application = context.applicationContext as Application,
                     observeTodayStepsUseCase = c.observeTodayStepsUseCase,
-                    tokenManager = c.tokenManager
+                    tokenManager = c.tokenManager,
                 )
             )
             val connectionsViewModel: ConnectionsViewModel = viewModel(
                 factory = ConnectionsViewModel.Factory(
                     connectUseCase = c.connectUseCase,
                     getConnectionsUseCase = c.getConnectionsUseCase,
-                    tokenManager = c.tokenManager
+                    tokenManager = c.tokenManager,
                 )
             )
             val stepsState by stepsViewModel.state.collectAsState()
             val connectionsState by connectionsViewModel.state.collectAsState()
+
+            // ── own lock status ───────────────────────────────────────────────
+            val ownIsLocked by stepsViewModel.ownIsLocked.collectAsState()
+            val ownLastUnlockedAtMs by stepsViewModel.ownLastUnlockedAtMs.collectAsState()
 
             HomeScreen(
                 stepsState = stepsState,
@@ -83,7 +87,9 @@ fun ConsnowNavHost() {
                 onLogout = {
                     authViewModel.logout()
                     navController.navigate(Routes.AUTH) { popUpTo(0) { inclusive = true } }
-                }
+                },
+                ownIsLocked = ownIsLocked,                   // ← new
+                ownLastUnlockedAtMs = ownLastUnlockedAtMs,   // ← new
             )
         }
 
@@ -92,7 +98,7 @@ fun ConsnowNavHost() {
                 factory = ConnectionsViewModel.Factory(
                     connectUseCase = c.connectUseCase,
                     getConnectionsUseCase = c.getConnectionsUseCase,
-                    tokenManager = c.tokenManager
+                    tokenManager = c.tokenManager,
                 )
             )
             val state by connectionsViewModel.state.collectAsState()
@@ -109,14 +115,22 @@ fun ConsnowNavHost() {
         ) { backStackEntry ->
             val peerId = backStackEntry.arguments?.getString("peerId") ?: return@composable
             val peerStepsViewModel: PeerStepsViewModel = viewModel(
-                factory = PeerStepsViewModel.Factory(c.getPeerStepsUseCase, peerId)
+                factory = PeerStepsViewModel.Factory(c.getPeerStepsUseCase, c.apiService, peerId)
             )
             val state by peerStepsViewModel.state.collectAsState()
+
+            // ── peer lock status ──────────────────────────────────────────────
+            val peerIsLocked by peerStepsViewModel.isLocked.collectAsState()
+            val peerLastUnlockedAtMs by peerStepsViewModel.lastUnlockedAtMs.collectAsState()
+
             LaunchedEffect(Unit) { peerStepsViewModel.startAutoRefresh() }
+
             PeerStepsScreen(
                 state = state,
                 onRefresh = { peerStepsViewModel.loadPeerSteps() },
-                onBack = { navController.popBackStack() }
+                onBack = { navController.popBackStack() },
+                isLocked = peerIsLocked,                     // ← new
+                lastUnlockedAtMs = peerLastUnlockedAtMs,     // ← new
             )
         }
     }

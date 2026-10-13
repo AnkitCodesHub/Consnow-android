@@ -43,4 +43,19 @@ interface ApiService {
         @Path("userId") userId: String,
         @Query("date") date: String
     ): Response<PeerStepsResponse>
+    @PUT("activity/unlock") //sends a put req. when phone unlocked & the backend records the unlock timme
+    suspend fun reportUnlock(): Response<UnlockResponse>
+
+    @PUT("activity/lock") //put request when phone is locked
+    suspend fun reportLock(): Response<LockResponse>
+
+    @GET("activity/me") //fetches activity from backend
+    suspend fun getMyActivity(): Response<OwnActivityResponse>
+
+    @GET("activity/peer/{userId}") //fetches another users activity from backend
+    suspend fun getPeerActivity(@Path("userId") userId: String): Response<PeerActivityResponse>
+
+// Data classes (add to your models file or inline):
+data class UnlockResponse(val success: Boolean, val unlockedAt: String)
+data class PeerUnlockResponse(val userId: Int, val unlockedAt: String?)
 }
