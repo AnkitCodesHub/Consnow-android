@@ -41,6 +41,11 @@ class SocketManager(
             socket?.on(Socket.EVENT_CONNECT_ERROR) { args ->
                 Log.e(TAG, "Socket connect error: ${args.firstOrNull()}")
             }
+
+            // Emitted by server when a peer unlocks their phone.
+            // Payload: { userId: string, unlockedAt: ISO string }
+            // unlockedAt is the exact moment the unlock happened on the peer's device,
+            // used by PeerStepsViewModel to drive the "unlocked X ago" ticker.
             socket?.on("peer_unlocked") { args ->
                 try {
                     val data = args[0] as JSONObject
@@ -51,21 +56,30 @@ class SocketManager(
                     Log.e(TAG, "peer_unlocked parse error: ${e.message}")
                 }
             }
+
+            // Emitted by server when a peer locks their phone.
+            // Payload: { userId: string, lockedAt: ISO string }
+            // lockedAt is optional — if absent (older server), lockedAtMs will be null
+            // and PeerStepsViewModel will fall back to the last known unlockedAt.
             socket?.on("peer_locked") { args ->
                 try {
                     val data = args[0] as JSONObject
                     val userId = data.getString("userId")
-                    scope.launch { ActivityEventBus.emit(PeerLockEvent(userId)) }
+                    val lockedAtMs = data.optString("lockedAt")
+                        .takeIf { it.isNotEmpty() }
+                        ?.let { Instant.parse(it).toEpochMilli() }
+                    scope.launch { ActivityEventBus.emit(PeerLockEvent(userId, lockedAtMs)) }
                 } catch (e: Exception) {
                     Log.e(TAG, "peer_locked parse error: ${e.message}")
                 }
             }
 
-            socket?.connect()  // ← always last
+            socket?.connect()  // ← always last; registering listeners before connect avoids race
         } catch (e: Exception) {
             Log.e(TAG, "Socket init error: ${e.message}")
         }
     }
+
     fun disconnect() {
         socket?.disconnect()
         socket = null

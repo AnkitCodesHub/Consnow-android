@@ -13,7 +13,22 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.*
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
 
+/**
+ * LockStatusWidget — shows the peer's current phone lock state.
+ *
+ * Two states:
+ *   - Unlocked → open lock icon + "Unlocked"
+ *   - Locked   → closed lock icon + "Last unlocked Xm Ys Ago" (live timer)
+ *
+ * Offline is handled in PeerStepsViewModel — when network fails,
+ * isLocked is set to true, so this widget naturally shows locked.
+ *
+ * @param isLocked         whether the peer's phone is locked
+ * @param lastUnlockedAtMs epoch millis of peer's last unlock, 0 if never unlocked
+ */
 @Composable
 fun LockStatusWidget(
     isLocked: Boolean,
@@ -24,12 +39,23 @@ fun LockStatusWidget(
 
     LaunchedEffect(isLocked, lastUnlockedAtMs) {
         when {
+            // Phone is unlocked
             !isLocked -> timerText = "Unlocked"
+
+            // Phone is locked, never unlocked before
             lastUnlockedAtMs == 0L -> timerText = "—"
+
+            // Phone is locked — show live "Last unlocked X ago" timer
             else -> {
                 while (true) {
-                    val total = (System.currentTimeMillis() - lastUnlockedAtMs) / 1000
-                    timerText = "${total / 60}m ${total % 60}s Ago"
+                    // NEW -- updated 21 oct
+                    val s = ((System.currentTimeMillis() - lastUnlockedAtMs) / 1000).coerceAtLeast(0)
+                    timerText = when {
+                        s < 60     -> "${s}s ago"
+                        s < 3_600  -> "${s / 60}m ago"
+                        s < 86_400 -> "${s / 3_600}h ago"
+                        else       -> "${s / 86_400}d ago"
+                    }
                     delay(1_000)
                 }
             }
@@ -46,14 +72,22 @@ fun LockStatusWidget(
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = if (isLocked && lastUnlockedAtMs > 0L) "Last unlocked $timerText"
-            else timerText,
-            style = MaterialTheme.typography.bodyMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            text = if (isLocked && lastUnlockedAtMs > 0L) "Last Unlocked $timerText" else timerText,
+
+            style = MaterialTheme.typography.titleMedium.copy(
+                fontWeight = FontWeight.Bold,
+                fontSize = 20.sp,
+                letterSpacing = 0.5.sp,
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
         )
     }
 }
 
+/**
+ * Animated lock icon drawn on Canvas.
+ * Shackle rotates open (-52°) when unlocked, returns to 0° when locked.
+ */
 @Composable
 private fun AnimatedLockIcon(isLocked: Boolean, modifier: Modifier = Modifier) {
     val transition = updateTransition(targetState = isLocked, label = "lock")
@@ -66,7 +100,8 @@ private fun AnimatedLockIcon(isLocked: Boolean, modifier: Modifier = Modifier) {
 
     Canvas(modifier = modifier) {
         val sw = size.width * 0.09f
-        // Body
+
+        // Lock body rectangle
         drawRoundRect(
             color = color,
             topLeft = Offset(size.width * 0.12f, size.height * 0.43f),
@@ -74,13 +109,15 @@ private fun AnimatedLockIcon(isLocked: Boolean, modifier: Modifier = Modifier) {
             cornerRadius = CornerRadius(size.width * 0.1f),
             style = Stroke(width = sw, cap = StrokeCap.Round),
         )
-        // Keyhole
+
+        // Keyhole circle in center of body
         drawCircle(
             color = color,
             radius = size.width * 0.075f,
             center = Offset(size.width / 2f, size.height * 0.67f),
         )
-        // Shackle — pivots from left anchor on open
+
+        // Shackle arc — pivots from left anchor point when opening
         withTransform({
             rotate(
                 degrees = shackleRotation,

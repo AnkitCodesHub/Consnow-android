@@ -139,8 +139,10 @@ class StepsViewModel(
                 if (response.isSuccessful) {
                     response.body()?.let { body ->
                         _ownIsLocked.value = body.isLocked
-                        body.unlockedAt?.let { iso ->
-                            _ownLastUnlockedAtMs.value = Instant.parse(iso).toEpochMilli()
+                        // NEW
+                        body.unlockedAt?.let { iso -> //edited on 21 oct
+                            val ms = Instant.parse(iso).toEpochMilli()
+                            if (ms > _ownLastUnlockedAtMs.value) _ownLastUnlockedAtMs.value = ms
                         }
                     }
                 }
@@ -156,11 +158,9 @@ class StepsViewModel(
     private fun observeOwnLockEvents() {
         viewModelScope.launch {
             ActivityEventBus.ownLockStatus.collect { event ->
-                _ownIsLocked.value = event.isLocked
-                // Only update the timestamp on unlock — lock doesn't change last-unlocked time
-                if (!event.isLocked) {
-                    _ownLastUnlockedAtMs.value = event.timestamp
-                }
+                // NEW
+                _ownIsLocked.value = event.isLocked //edited on 21 oct
+                if (event.timestamp > _ownLastUnlockedAtMs.value) _ownLastUnlockedAtMs.value = event.timestamp
             }
         }
     }

@@ -1,4 +1,5 @@
 
+//Aankit Raj  Date:- 21 oct
 //Handles peer unlocks , peer locks,and your own lock status
 package com.Consnow.core.common
 
@@ -7,9 +8,9 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 
-data class PeerUnlockEvent(val userId: String, val unlockedAtMs: Long)//contains peer's id and their unlock timestamp
-data class PeerLockEvent(val userId: String) //contains the id of the who locked their phone
-data class OwnLockStatusEvent(val isLocked: Boolean, val timestamp: Long) // contains your lock status and a timestamp
+data class PeerUnlockEvent(val userId: String, val unlockedAtMs: Long) // peer's id and their unlock timestamp
+data class PeerLockEvent(val userId: String, val lockedAtMs: Long? = null) // peer's id and optional lock timestamp
+data class OwnLockStatusEvent(val isLocked: Boolean, val timestamp: Long) // your own lock status and timestamp
 
 object ActivityEventBus {
     private val _peerUnlocked = MutableSharedFlow<PeerUnlockEvent>(

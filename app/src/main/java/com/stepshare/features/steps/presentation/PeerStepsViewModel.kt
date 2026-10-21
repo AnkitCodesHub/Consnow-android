@@ -1,5 +1,6 @@
 package com.Consnow.features.steps.presentation
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -16,7 +17,6 @@ import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
-import android.util.Log
 
 class PeerStepsViewModel(
     private val getPeerStepsUseCase: GetPeerStepsUseCase,
@@ -24,18 +24,21 @@ class PeerStepsViewModel(
     private val peerId: String,
 ) : ViewModel() {
 
-    // ── lock status ──────────────────────────────────────────────────────────
+    // Whether the peer's phone is locked.
+    // Defaults to true — treat unknown/offline state as locked.
     private val _isLocked = MutableStateFlow(true)
     val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
 
+    // Epoch millis of peer's last unlock — fed into LockStatusWidget timer.
+    // Only ever moves forward via applyTimestamp() to prevent stale overwrites.
     private val _lastUnlockedAtMs = MutableStateFlow(0L)
     val lastUnlockedAtMs: StateFlow<Long> = _lastUnlockedAtMs.asStateFlow()
 
-    // ── legacy text label (kept for backward compat) ─────────────────────────
+    // Legacy text label — kept for backward compat with any screen still reading it
     private val _peerLastUnlocked = MutableStateFlow("—")
     val peerLastUnlocked: StateFlow<String> = _peerLastUnlocked.asStateFlow()
 
-    // ── steps state ──────────────────────────────────────────────────────────
+    // Step count + activity state for PeerStepsScreen
     private val _state = MutableStateFlow(PeerStepsState(isLoading = true))
     val state = _state.asStateFlow()
 
@@ -44,47 +47,83 @@ class PeerStepsViewModel(
 
     init {
         loadPeerSteps()
+        fetchPeerActivity()
+        listenForWebSocketEvents()
+        startActivityPolling()
+    }
 
-        // Initial fetch from REST — replaces old getPeerLastUnlock call
+    /**
+     * Initial REST fetch of peer's lock state.
+     * Runs once on ViewModel creation to populate the widget before
+     * WebSocket or polling kicks in.
+     * Uses applyTimestamp() so a late-arriving WebSocket event cannot be
+     * overwritten by a slow REST response.
+     * On failure, defaults to locked.
+     */
+    private fun fetchPeerActivity() {
         viewModelScope.launch {
             try {
                 val response = apiService.getPeerActivity(peerId)
-                Log.d("PeerLock", "response code: ${response.code()}")
-                Log.d("PeerLock", "body: ${response.body()}")
+                Log.d("PeerLock", "code=${response.code()} body=${response.body()}")
                 if (response.isSuccessful) {
                     response.body()?.let { body ->
                         Log.d("PeerLock", "isLocked=${body.isLocked} unlockedAt=${body.unlockedAt}")
-                        _isLocked.value = body.isLocked
+                        _isLocked.value = if (!body.isOnline) true else body.isLocked
                         body.unlockedAt?.let { iso ->
-                            val ms = Instant.parse(iso).toEpochMilli()
-                            _lastUnlockedAtMs.value = ms
-                            _peerLastUnlocked.value = formatUnlockTime(ms)
+                            applyTimestamp(Instant.parse(iso).toEpochMilli())
                         }
                     }
                 }
             } catch (e: Exception) {
-                Log.e("PeerLock", "failed: ${e.message}")
+                Log.e("PeerLock", "fetchPeerActivity failed: ${e.message}")
+                _isLocked.value = true  // offline — show as locked
             }
         }
+    }
 
-        // Real-time unlock event via WebSocket
+    /**
+     * Listens for real-time lock/unlock events from WebSocket via ActivityEventBus.
+     * Filters by peerId so we only react to events for this specific peer.
+     * When WebSocket is not connected, the 15s polling fallback covers this.
+     *
+     * peerUnlocked: server sends the exact unlock timestamp — passed to
+     *   applyTimestamp() so the "X ago" ticker starts from the real moment.
+     *
+     * peerLocked: server may send lockedAt (the lock transition timestamp).
+     *   If present, applyTimestamp() advances the reference time so the widget
+     *   shows "locked X ago" rather than "unlocked X ago".
+     *   If absent (older server), the last known unlockedAt is kept as-is.
+     */
+    private fun listenForWebSocketEvents() {
+        // Peer unlocked their phone
         viewModelScope.launch {
             ActivityEventBus.peerUnlocked
                 .filter { it.userId == peerId }
                 .collect { event ->
                     _isLocked.value = false
-                    _lastUnlockedAtMs.value = event.unlockedAtMs
-                    _peerLastUnlocked.value = formatUnlockTime(event.unlockedAtMs)
+                    applyTimestamp(event.unlockedAtMs)
                 }
         }
 
-        // Real-time lock event via WebSocket
+        // Peer locked their phone
         viewModelScope.launch {
             ActivityEventBus.peerLocked
                 .filter { it.userId == peerId }
-                .collect { _isLocked.value = true }
+                .collect { event ->
+                    _isLocked.value = true
+                    // Advance reference time to the lock moment if server provided it,
+                    // so the widget counts from when the phone locked, not when it unlocked
+                    event.lockedAtMs?.let(::applyTimestamp)
+                }
         }
-        // Polling fallback — updates lock status every 15s when socket isn't connected
+    }
+
+    /**
+     * Polls GET /activity/peer/:id every 15s as fallback when WebSocket is not connected.
+     * Uses applyTimestamp() so a stale poll cannot overwrite a fresher WebSocket event.
+     * On network failure, sets isLocked = true so widget shows locked instead of stale state.
+     */
+    private fun startActivityPolling() {
         viewModelScope.launch {
             while (true) {
                 delay(15_000)
@@ -92,19 +131,23 @@ class PeerStepsViewModel(
                     val response = apiService.getPeerActivity(peerId)
                     if (response.isSuccessful) {
                         response.body()?.let { body ->
-                            _isLocked.value = body.isLocked
+                            _isLocked.value = if (!body.isOnline) true else body.isLocked
                             body.unlockedAt?.let { iso ->
-                                val ms = Instant.parse(iso).toEpochMilli()
-                                _lastUnlockedAtMs.value = ms
-                                _peerLastUnlocked.value = formatUnlockTime(ms)
+                                applyTimestamp(Instant.parse(iso).toEpochMilli())
                             }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                    _isLocked.value = true  // offline — show as locked
+                }
             }
         }
     }
 
+    /**
+     * Fetches peer's step count and activity status.
+     * Called once on init and then every 5s via startAutoRefresh().
+     */
     fun loadPeerSteps() {
         viewModelScope.launch {
             if (isInitialLoad) {
@@ -125,6 +168,7 @@ class PeerStepsViewModel(
                     }
                 }
                 is Result.Error -> {
+                    // Keep showing last known data on error — don't replace with error screen
                     if (isInitialLoad) {
                         _state.update { it.copy(isLoading = false, error = result.message) }
                     }
@@ -134,6 +178,11 @@ class PeerStepsViewModel(
         }
     }
 
+    /**
+     * Starts auto-refreshing peer steps every 5s.
+     * Called from PeerStepsScreen when it becomes visible.
+     * Guard flag prevents duplicate loops if called multiple times.
+     */
     fun startAutoRefresh() {
         if (refreshStarted) return
         refreshStarted = true
@@ -145,6 +194,30 @@ class PeerStepsViewModel(
         }
     }
 
+    /**
+     * Advances the unlock/lock reference timestamp only if the new value is
+     * more recent than what we already have.
+     *
+     * This guards against three stale-write scenarios:
+     *   1. A slow REST poll arriving after a faster WebSocket event
+     *   2. Out-of-order WebSocket events (rare but possible on reconnect)
+     *   3. A 15s poll overwriting a lock event that just arrived via WebSocket
+     *
+     * Both the "unlocked X ago" and "locked X ago" cases flow through here —
+     * the caller decides what the timestamp means, this just ensures time
+     * never goes backwards.
+     */
+    private fun applyTimestamp(ms: Long) {
+        if (ms >= _lastUnlockedAtMs.value) {
+            _lastUnlockedAtMs.value = ms
+            _peerLastUnlocked.value = formatUnlockTime(ms)
+        }
+    }
+
+    /**
+     * Formats epoch millis into a human-readable "X ago" string.
+     * Used for the legacy _peerLastUnlocked label.
+     */
     private fun formatUnlockTime(ms: Long): String {
         val seconds = (System.currentTimeMillis() - ms) / 1000
         return when {

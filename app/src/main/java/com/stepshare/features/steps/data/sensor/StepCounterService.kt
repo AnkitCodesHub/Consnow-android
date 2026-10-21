@@ -1,5 +1,7 @@
 //edited: 04/10/2026 by Ankit
 //updated: 14/10/2026 — added lock/unlock reporting
+//updated: 15/10/2026 — added offline queue, heartbeat, LockSyncWorker
+//updated: 20/10/2026 — simplified lock/unlock: dropped Room queue, timestamp now passed from receiver
 package com.Consnow.features.steps.data.sensor
 
 import android.app.*
@@ -21,7 +23,7 @@ import com.Consnow.core.common.ActivityEventBus
 import com.Consnow.core.common.OwnLockStatusEvent
 import com.Consnow.core.network.SocketManager
 import com.Consnow.core.network.api.ApiService
-import com.Consnow.features.steps.data.sensor.PhoneUnlockReceiver
+import com.Consnow.core.network.dto.LockEventRequest
 import kotlinx.coroutines.*
 
 class StepCounterService : Service(), SensorEventListener {
@@ -43,6 +45,16 @@ class StepCounterService : Service(), SensorEventListener {
     private var syncDebounceJob: Job? = null
     private var syncJob: Job? = null
     private var lastSyncTime = 0L
+
+    // Heartbeat job — runs every 60s while phone is unlocked.
+    // Keeps lastHeartbeatAt fresh on server so peers know user is online.
+    // Cancelled when phone locks, started when phone unlocks.
+    private var heartbeatJob: Job? = null
+
+    // Tracks the last known lock state to guard against duplicate broadcasts.
+    // ACTION_SCREEN_OFF can fire multiple times; this ensures we only report
+    // a real transition (unlocked → locked or locked → unlocked).
+    private var lastKnownLocked: Boolean? = null
 
     companion object {
         const val CHANNEL_ID = "step_counter_channel"
@@ -89,7 +101,7 @@ class StepCounterService : Service(), SensorEventListener {
         startPeriodicSync()
         startActivityCheck()
 
-        // Connect socket with JWT token
+        // Connect WebSocket with JWT token for real-time peer events
         val tokenManager = (application as ConsnowApp).appContainer.tokenManager
         serviceScope.launch {
             val token = tokenManager.getToken() ?: ""
@@ -99,56 +111,119 @@ class StepCounterService : Service(), SensorEventListener {
             }
         }
 
-        // Emit current lock state immediately on service start
+        // Snapshot the current lock state when the service starts.
+        // Emits timestamp=0 so the server and peers never treat this as a
+        // real transition — it is a state report only, not a new unlock event.
         val km = getSystemService(KEYGUARD_SERVICE) as KeyguardManager
+        val initiallyLocked = km.isKeyguardLocked
+        lastKnownLocked = initiallyLocked
         serviceScope.launch {
             ActivityEventBus.emitOwnLockStatus(
-                OwnLockStatusEvent(
-                    isLocked = km.isKeyguardLocked,
-                    timestamp = System.currentTimeMillis(),
-                )
+                OwnLockStatusEvent(isLocked = initiallyLocked, timestamp = 0L)
             )
         }
+        // If already unlocked when service starts, begin heartbeat immediately
+        if (!initiallyLocked) startHeartbeat()
 
-        // Register for both unlock and screen-off broadcasts
+        // Register BroadcastReceiver for lock/unlock transitions.
+        // ACTION_USER_PRESENT fires when the user dismisses the lock screen.
+        // ACTION_SCREEN_OFF fires when the screen turns off (= phone locked).
         val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_USER_PRESENT) // phone unlocked
-            addAction(Intent.ACTION_SCREEN_OFF)   // screen off = locked
+            addAction(Intent.ACTION_USER_PRESENT)
+            addAction(Intent.ACTION_SCREEN_OFF)
         }
         unlockReceiver = PhoneUnlockReceiver(
-            onUnlock = { serviceScope.launch { reportUnlock() } },
-            onLock = { serviceScope.launch { reportLock() } },
+            onUnlock = {
+                // Guard: ignore if we already think the phone is unlocked
+                if (lastKnownLocked != false) {
+                    lastKnownLocked = false
+                    val at = System.currentTimeMillis()
+                    serviceScope.launch { reportUnlock(at) }
+                }
+            },
+            onLock = {
+                // Guard: ignore SCREEN_OFF if phone was never seen as unlocked
+                if (lastKnownLocked != true) {
+                    lastKnownLocked = true
+                    val at = System.currentTimeMillis()
+                    serviceScope.launch { reportLock(at) }
+                }
+            },
         )
         registerReceiver(unlockReceiver, filter)
     }
 
-    // Reports unlock to backend + emits own status to HomeScreen immediately
-    private suspend fun reportUnlock() {
+    /**
+     * Called when the user unlocks their phone.
+     *
+     * [at] is the epoch-millis timestamp captured in the BroadcastReceiver
+     * callback — this is the moment the transition happened, not when the
+     * coroutine runs. Sending it to the server allows the guarded upsert
+     * (WHERE unlockedAt <= EXCLUDED.unlockedAt) to reject stale events.
+     *
+     * Flow:
+     * 1. Start heartbeat so server knows user is online
+     * 2. Emit local state so HomeScreen updates instantly
+     * 3. POST to server with the exact transition timestamp
+     */
+    private suspend fun reportUnlock(at: Long) {
+        startHeartbeat()
+        ActivityEventBus.emitOwnLockStatus(OwnLockStatusEvent(isLocked = false, timestamp = at))
         try {
-            apiService.reportUnlock()
-            ActivityEventBus.emitOwnLockStatus(
-                OwnLockStatusEvent(isLocked = false, timestamp = System.currentTimeMillis())
-            )
-            Log.d("StepCounterService", "Unlock reported")
+            apiService.reportUnlock(LockEventRequest(occurredAt = at))
         } catch (e: Exception) {
             Log.e("StepCounterService", "Failed to report unlock: ${e.message}")
         }
     }
 
-    // Reports lock to backend + emits own status to HomeScreen immediately
-    private suspend fun reportLock() {
+    /**
+     * Called when the user locks their phone (screen off).
+     *
+     * [at] is the epoch-millis timestamp captured in the BroadcastReceiver
+     * callback — same rationale as reportUnlock.
+     *
+     * Flow:
+     * 1. Stop heartbeat — no need to ping while locked
+     * 2. Emit local state so HomeScreen updates instantly
+     * 3. POST to server with the exact transition timestamp
+     */
+    private suspend fun reportLock(at: Long) {
+        stopHeartbeat()
+        ActivityEventBus.emitOwnLockStatus(OwnLockStatusEvent(isLocked = true, timestamp = at))
         try {
-            apiService.reportLock()
-            ActivityEventBus.emitOwnLockStatus(
-                OwnLockStatusEvent(isLocked = true, timestamp = System.currentTimeMillis())
-            )
-            Log.d("StepCounterService", "Lock reported")
+            apiService.reportLock(LockEventRequest(occurredAt = at))
         } catch (e: Exception) {
             Log.e("StepCounterService", "Failed to report lock: ${e.message}")
         }
     }
 
-    // Polls backend every 15s as a fallback sync
+    /**
+     * Sends a heartbeat ping to the server every 60s while phone is unlocked.
+     * Server uses lastHeartbeatAt to determine online state:
+     *   - Fresh heartbeat (< 90s ago) → peer sees user as online + unlocked
+     *   - Stale heartbeat (> 90s ago) → peer sees user as offline
+     * This handles the case where the user goes offline while unlocked.
+     */
+    private fun startHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = serviceScope.launch {
+            while (isActive) {
+                try {
+                    apiService.sendHeartbeat()
+                    Log.d("Heartbeat", "Sent")
+                } catch (_: Exception) {}
+                delay(60_000L)
+            }
+        }
+    }
+
+    // Stops the heartbeat loop — called when phone locks or service is destroyed
+    private fun stopHeartbeat() {
+        heartbeatJob?.cancel()
+        heartbeatJob = null
+    }
+
+    // Polls step sync every 15s as fallback when foreground service is killed by OxygenOS
     private fun startPeriodicSync() {
         serviceScope.launch {
             while (true) {
@@ -164,7 +239,8 @@ class StepCounterService : Service(), SensorEventListener {
         }
     }
 
-    // Flips isCurrentlyActive → false after ACTIVITY_TIMEOUT_MS of no steps
+    // Flips isCurrentlyActive → false after ACTIVITY_TIMEOUT_MS of no steps.
+    // Forces a sync when user goes from walking → idle so server gets the final count.
     private fun startActivityCheck() {
         activityCheckJob?.cancel()
         activityCheckJob = serviceScope.launch {
@@ -172,7 +248,6 @@ class StepCounterService : Service(), SensorEventListener {
                 val now = System.currentTimeMillis()
                 val wasActive = isCurrentlyActive
                 isCurrentlyActive = lastStepAt > 0 && (now - lastStepAt) < ACTIVITY_TIMEOUT_MS
-                // Flip: was walking → now idle → force sync
                 if (wasActive && !isCurrentlyActive) startSync()
                 delay(ACTIVITY_CHECK_INTERVAL_MS)
             }
@@ -193,7 +268,7 @@ class StepCounterService : Service(), SensorEventListener {
         prefs.edit().putLong(KEY_LAST_STEP_AT, lastStepAt).apply()
 
         if (savedDate != today) {
-            // New day — reset baseline
+            // New day — reset baseline so steps start from 0
             initialSensorValue = totalSinceReboot
             prefs.edit()
                 .putFloat(KEY_INITIAL_VALUE, totalSinceReboot)
@@ -217,7 +292,7 @@ class StepCounterService : Service(), SensorEventListener {
         }
     }
 
-    // Saves steps locally then schedules a network sync
+    // Saves steps to Room then schedules a network sync
     private fun persistSteps(count: Int) {
         serviceScope.launch {
             try {
@@ -231,7 +306,8 @@ class StepCounterService : Service(), SensorEventListener {
         }
     }
 
-    // Immediate sync if interval passed, debounced sync otherwise
+    // Immediate sync if interval has passed, debounced sync otherwise.
+    // Prevents hammering the server on every step event.
     private fun scheduleSync() {
         val now = System.currentTimeMillis()
         if (now - lastSyncTime >= SYNC_INTERVAL_MS) {
@@ -249,7 +325,7 @@ class StepCounterService : Service(), SensorEventListener {
         }
     }
 
-    // Performs the actual network sync — skips if one is already running
+    // Performs the actual network sync — skips if one is already in flight
     private fun startSync() {
         if (syncJob?.isActive == true) return
         syncJob = serviceScope.launch {
@@ -262,6 +338,7 @@ class StepCounterService : Service(), SensorEventListener {
         }
     }
 
+    // Restores sensor baseline from SharedPreferences after service restart
     private fun restoreState() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val savedDate = prefs.getString(KEY_DATE, null)
@@ -278,6 +355,7 @@ class StepCounterService : Service(), SensorEventListener {
     override fun onDestroy() {
         sensorManager.unregisterListener(this)
         serviceScope.cancel()
+        stopHeartbeat()
         unlockReceiver?.let { unregisterReceiver(it) }
         unlockReceiver = null
         socketManager?.disconnect()

@@ -7,8 +7,8 @@
 //syncSteps(body)              →  PUT    /steps/sync
 //getMySteps(date)             →  GET    /steps/me?date=2026-10-04
 //getPeerSteps(userId, date)   →  GET    /steps/user/abc123?date=2026-10-04
+//updated: 15/10/2026 — reportUnlock/reportLock now accept LockEventRequest body
 
-//edited :- 04/10/2026 by Ankit
 package com.Consnow.core.network.api
 
 import com.Consnow.core.network.dto.*
@@ -43,19 +43,29 @@ interface ApiService {
         @Path("userId") userId: String,
         @Query("date") date: String
     ): Response<PeerStepsResponse>
-    @PUT("activity/unlock") //sends a put req. when phone unlocked & the backend records the unlock timme
-    suspend fun reportUnlock(): Response<UnlockResponse>
 
-    @PUT("activity/lock") //put request when phone is locked
-    suspend fun reportLock(): Response<LockResponse>
+    // Activity — lock/unlock/heartbeat
+    @PUT("activity/unlock")
+    suspend fun reportUnlock(@Body body: LockEventRequest): Response<UnlockResponse>
 
-    @GET("activity/me") //fetches activity from backend
+    @PUT("activity/lock")
+    suspend fun reportLock(@Body body: LockEventRequest): Response<LockResponse>
+
+    @PUT("activity/heartbeat")
+    suspend fun sendHeartbeat(): Response<Unit>
+
+    @PUT("activity/unlock")
+    suspend fun reportUnlock(@Body body: ActivityEventRequest): Response<UnlockResponse>
+
+    @PUT("activity/lock")
+    suspend fun reportLock(@Body body: ActivityEventRequest): Response<LockResponse>
+
+    @GET("activity/me")
     suspend fun getMyActivity(): Response<OwnActivityResponse>
 
-    @GET("activity/peer/{userId}") //fetches another users activity from backend
+    @GET("activity/peer/{userId}")
     suspend fun getPeerActivity(@Path("userId") userId: String): Response<PeerActivityResponse>
 
-// Data classes (add to your models file or inline):
-data class UnlockResponse(val success: Boolean, val unlockedAt: String)
-data class PeerUnlockResponse(val userId: Int, val unlockedAt: String?)
+    data class UnlockResponse(val success: Boolean, val unlockedAt: String)
+    data class PeerUnlockResponse(val userId: Int, val unlockedAt: String?)
 }

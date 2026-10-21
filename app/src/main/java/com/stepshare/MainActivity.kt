@@ -24,7 +24,6 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
-
         // Firebase user tracking
         val container = (application as ConsnowApp).appContainer
         lifecycleScope.launch {

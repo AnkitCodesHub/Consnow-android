@@ -31,11 +31,13 @@ fun ConsnowNavHost() {
     val c = app.appContainer
     val navController = rememberNavController()
 
+    // Auth ViewModel lives here so login state persists across all screens
     val authViewModel: AuthViewModel = viewModel(
         factory = AuthViewModel.Factory(c.loginUseCase, c.registerUseCase, c.authRepository)
     )
     val authState by authViewModel.state.collectAsState()
 
+    // Auto-navigate to Home when login succeeds, clearing the auth backstack
     LaunchedEffect(authState.isLoggedIn) {
         if (authState.isLoggedIn) {
             navController.navigate(Routes.HOME) {
@@ -48,10 +50,13 @@ fun ConsnowNavHost() {
         navController = navController,
         startDestination = if (authState.isLoggedIn) Routes.HOME else Routes.AUTH
     ) {
+
+        // ── Auth Screen ───────────────────────────────────────────────────────
         composable(Routes.AUTH) {
             AuthScreen(viewModel = authViewModel)
         }
 
+        // ── Home Screen ───────────────────────────────────────────────────────
         composable(Routes.HOME) {
             val stepsViewModel: StepsViewModel = viewModel(
                 factory = StepsViewModel.Factory(
@@ -70,7 +75,8 @@ fun ConsnowNavHost() {
             val stepsState by stepsViewModel.state.collectAsState()
             val connectionsState by connectionsViewModel.state.collectAsState()
 
-            // ── own lock status ───────────────────────────────────────────────
+            // Own lock status — sourced from ActivityEventBus via StepsViewModel
+            // Updated immediately on lock/unlock via BroadcastReceiver in StepCounterService
             val ownIsLocked by stepsViewModel.ownIsLocked.collectAsState()
             val ownLastUnlockedAtMs by stepsViewModel.ownLastUnlockedAtMs.collectAsState()
 
@@ -88,11 +94,12 @@ fun ConsnowNavHost() {
                     authViewModel.logout()
                     navController.navigate(Routes.AUTH) { popUpTo(0) { inclusive = true } }
                 },
-                ownIsLocked = ownIsLocked,                   // ← new
-                ownLastUnlockedAtMs = ownLastUnlockedAtMs,   // ← new
+                ownIsLocked = ownIsLocked,
+                ownLastUnlockedAtMs = ownLastUnlockedAtMs,
             )
         }
 
+        // ── Connect Screen ────────────────────────────────────────────────────
         composable(Routes.CONNECT) {
             val connectionsViewModel: ConnectionsViewModel = viewModel(
                 factory = ConnectionsViewModel.Factory(
@@ -109,28 +116,34 @@ fun ConsnowNavHost() {
             )
         }
 
+        // ── Peer Steps Screen ─────────────────────────────────────────────────
         composable(
             route = Routes.PEER_STEPS,
             arguments = listOf(navArgument("peerId") { type = NavType.StringType })
         ) { backStackEntry ->
             val peerId = backStackEntry.arguments?.getString("peerId") ?: return@composable
+
             val peerStepsViewModel: PeerStepsViewModel = viewModel(
                 factory = PeerStepsViewModel.Factory(c.getPeerStepsUseCase, c.apiService, peerId)
             )
             val state by peerStepsViewModel.state.collectAsState()
 
-            // ── peer lock status ──────────────────────────────────────────────
+            // Peer lock status — polled every 15s + updated via WebSocket events
+            // isOnline drives the offline state in LockStatusWidget (heartbeat-based)
             val peerIsLocked by peerStepsViewModel.isLocked.collectAsState()
+//            val peerIsOnline by peerStepsViewModel.isOnline.collectAsState()
             val peerLastUnlockedAtMs by peerStepsViewModel.lastUnlockedAtMs.collectAsState()
 
+            // Start auto-refreshing peer steps every 5s when this screen is visible
             LaunchedEffect(Unit) { peerStepsViewModel.startAutoRefresh() }
 
             PeerStepsScreen(
                 state = state,
                 onRefresh = { peerStepsViewModel.loadPeerSteps() },
                 onBack = { navController.popBackStack() },
-                isLocked = peerIsLocked,                     // ← new
-                lastUnlockedAtMs = peerLastUnlockedAtMs,     // ← new
+                isLocked = peerIsLocked,
+//                isOnline = peerIsOnline,
+                lastUnlockedAtMs = peerLastUnlockedAtMs,
             )
         }
     }
