@@ -71,7 +71,7 @@ fun LockStatusWidget(
             modifier = Modifier.size(56.dp),
         )
         Spacer(Modifier.height(8.dp))
-        Text(
+        Text( //edited -- 21/oct/2026
             text = if (isLocked && lastUnlockedAtMs > 0L) "Last Unlocked $timerText" else timerText,
 
             style = MaterialTheme.typography.titleMedium.copy(
