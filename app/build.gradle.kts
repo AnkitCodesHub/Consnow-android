@@ -7,15 +7,15 @@ plugins {
 
 android {
     namespace = "com.Consnow"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.Consnow"
         minSdk = 26
-        targetSdk = 34
-        versionCode = 1
+        targetSdk = 36
+        versionCode = 2
         versionName = "1.0.0"
-        buildConfigField("String", "API_BASE_URL", "\"consnow-backend-production.up.railway.app/\"")
+        buildConfigField("String", "API_BASE_URL", "\"https://consnow-backend-production.up.railway.app/\"")
     }
 
     buildFeatures {

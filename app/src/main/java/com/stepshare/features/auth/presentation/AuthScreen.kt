@@ -14,6 +14,9 @@ import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.res.painterResource
+import com.Consnow.R
 
 @Composable
 fun AuthScreen(viewModel: AuthViewModel) {
@@ -31,6 +34,14 @@ fun AuthScreen(viewModel: AuthViewModel) {
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center
     ) {
+        Image(
+            painter = painterResource(R.drawable.ic_consnow_logo),
+            contentDescription = null,
+            modifier = Modifier.size(72.dp)
+        )
+
+        Spacer(Modifier.height(16.dp))
+
         Text(
             text = "Consnow",
             style = MaterialTheme.typography.headlineLarge,

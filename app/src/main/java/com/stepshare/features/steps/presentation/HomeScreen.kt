@@ -30,6 +30,14 @@ import com.Consnow.features.connections.domain.model.PeerInfo
 import com.Consnow.features.steps.domain.model.StepsState
 import com.Consnow.ui.components.LockStatusWidget
 import com.Consnow.ui.components.StepCard
+//edited on 26/10/2026
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 
 @Composable
 fun HomeScreen(
@@ -40,6 +48,7 @@ fun HomeScreen(
     onPeerClick: (PeerInfo) -> Unit,
     onConnectClick: () -> Unit,
     onLogout: () -> Unit,
+    onDeleteAccount: () -> Unit, //option to delete account
     ownIsLocked: Boolean = true,
     ownLastUnlockedAtMs: Long = 0L,
 ) {
@@ -246,20 +255,39 @@ fun HomeScreen(
             }
         }
 
-        // Sign out
+        // Sign out + Delete account
         item {
             Spacer(modifier = Modifier.height(32.dp))
 
-            TextButton(
-                onClick = onLogout
-            ) {
-                Text(
-                    text = "Sign out",
-                    color = MaterialTheme.colorScheme.error
+            var showDeleteDialog by remember { mutableStateOf(false) }
+
+            if (showDeleteDialog) {
+                AlertDialog(
+                    onDismissRequest = { showDeleteDialog = false },
+                    title = { Text("Delete Account") },
+                    text = { Text("This will permanently delete your account and all your data. This cannot be undone.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            showDeleteDialog = false
+                            onDeleteAccount()
+                        }) { Text("Delete", color = MaterialTheme.colorScheme.error) }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { showDeleteDialog = false }) { Text("Cancel") }
+                    }
                 )
+            }
+
+            TextButton(onClick = onLogout) {
+                Text("Sign out", color = MaterialTheme.colorScheme.error)
+            }
+
+            TextButton(onClick = { showDeleteDialog = true }) {
+                Text("Delete Account", color = MaterialTheme.colorScheme.error)
             }
         }
     }
+
 }
 
 @Composable
@@ -279,22 +307,15 @@ private fun PeerCard(
             modifier = Modifier.padding(16.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Avatar
             Box(
                 modifier = Modifier
                     .size(40.dp)
                     .clip(RoundedCornerShape(20.dp))
-                    .background(
-                        MaterialTheme.colorScheme.primaryContainer
-                    ),
+                    .background(MaterialTheme.colorScheme.primaryContainer),
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = peer.name
-                        .firstOrNull()
-                        ?.uppercaseChar()
-                        ?.toString()
-                        ?: "?",
+                    text = peer.name.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
                     style = MaterialTheme.typography.titleLarge,
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -302,21 +323,10 @@ private fun PeerCard(
 
             Spacer(modifier = Modifier.width(16.dp))
 
-            // Peer information
-            Column(
-                modifier = Modifier.weight(1f)
-            ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = peer.name, style = MaterialTheme.typography.bodyLarge)
                 Text(
-                    text = peer.name,
-                    style = MaterialTheme.typography.bodyLarge
-                )
-
-                Text(
-                    text = if (peer.sharingEnabled) {
-                        "Sharing steps"
-                    } else {
-                        "Sharing paused"
-                    },
+                    text = if (peer.sharingEnabled) "Sharing steps" else "Sharing paused",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -331,21 +341,15 @@ private fun PeerCard(
     }
 }
 
-
 private fun formatPeerTimeAgo(isoTimestamp: String): String {
     return try {
-        val sdf = java.text.SimpleDateFormat(
-            "yyyy-MM-dd'T'HH:mm:ss",
-            java.util.Locale.US
-        )
+        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
         sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-
         val then = sdf.parse(isoTimestamp)?.time ?: return "Unknown"
         val now = System.currentTimeMillis()
         val diffMs = now - then
         val minutes = diffMs / 60_000
         val hours = minutes / 60
-
         when {
             minutes < 1 -> "just now"
             minutes < 60 -> "${minutes}m ago"

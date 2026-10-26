@@ -94,6 +94,17 @@ fun ConsnowNavHost() {
                     authViewModel.logout()
                     navController.navigate(Routes.AUTH) { popUpTo(0) { inclusive = true } }
                 },
+                onDeleteAccount = {
+                    stepsViewModel.deleteAccount(
+                        onSuccess = {
+                            authViewModel.logout()
+                            navController.navigate(Routes.AUTH) { popUpTo(0) { inclusive = true } }
+                        },
+                        onError = {
+                            // silently ignore for now — can add a Snackbar later
+                        }
+                    )
+                },
                 ownIsLocked = ownIsLocked,
                 ownLastUnlockedAtMs = ownLastUnlockedAtMs,
             )

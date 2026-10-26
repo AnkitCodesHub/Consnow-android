@@ -54,6 +54,9 @@ interface ApiService {
     @PUT("activity/heartbeat")
     suspend fun sendHeartbeat(): Response<Unit>
 
+    @DELETE("auth/me") //edited on 26/10/2026
+    suspend fun deleteAccount(): Response<Unit>
+
     @PUT("activity/unlock")
     suspend fun reportUnlock(@Body body: ActivityEventRequest): Response<UnlockResponse>
 

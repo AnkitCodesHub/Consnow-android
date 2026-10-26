@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.time.Instant
 
+
 class StepsViewModel(
     private val application: Application,
     private val observeTodayStepsUseCase: ObserveTodayStepsUseCase,
@@ -122,7 +123,8 @@ class StepsViewModel(
                             _state.update { it.copy(lastActiveAt = cached) }
                         }
                     }
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
                 delay(15_000)
             }
         }
@@ -160,7 +162,8 @@ class StepsViewModel(
             ActivityEventBus.ownLockStatus.collect { event ->
                 // NEW
                 _ownIsLocked.value = event.isLocked //edited on 21 oct
-                if (event.timestamp > _ownLastUnlockedAtMs.value) _ownLastUnlockedAtMs.value = event.timestamp
+                if (event.timestamp > _ownLastUnlockedAtMs.value) _ownLastUnlockedAtMs.value =
+                    event.timestamp
             }
         }
     }
@@ -176,7 +179,29 @@ class StepsViewModel(
         _state.update { it.copy(permissionGranted = false) }
     }
 
-    fun triggerSync() { SyncWorker.syncNow(application) }
+    fun triggerSync() {
+        SyncWorker.syncNow(application)
+    }
+// added on 26/10/2026
+    // ── account deletion ──────────────────────────────────────────────────────
+    fun deleteAccount(onSuccess: () -> Unit, onError: () -> Unit) {
+        viewModelScope.launch {
+            try {
+                val app = application as ConsnowApp
+                val response = app.appContainer.apiService.deleteAccount()
+                if (response.isSuccessful) {
+                    // Clear local token and data
+                    tokenManager.clearSession()
+                    app.appContainer.database.clearAllTables()
+                    onSuccess()
+                } else {
+                    onError()
+                }
+            } catch (e: Exception) {
+                onError()
+            }
+        }
+    }
 
     // ── factory ───────────────────────────────────────────────────────────────
     class Factory(
