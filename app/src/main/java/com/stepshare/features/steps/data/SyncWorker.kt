@@ -15,6 +15,7 @@ class SyncWorker(
         return try {
             // isActive = false — this runs when network returns after offline,
             // user is not actively walking at this point
+            app.appContainer.authRepository.refreshTokenIfStale()
             app.appContainer.stepsRepository.syncPendingToServer(isActive = false)
             Result.success()
         } catch (_: Exception) {

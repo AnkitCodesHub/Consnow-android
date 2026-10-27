@@ -24,9 +24,13 @@ class AuthViewModel(
 
     init { checkSession() }
 
+    // Follows the stored token, so an expired session (cleared on a 401) sends the
+    // user back to login instead of leaving them on a Home screen that never updates.
     private fun checkSession() {
         viewModelScope.launch {
-            _state.update { it.copy(isLoggedIn = authRepository.isLoggedIn()) }
+            authRepository.observeLoggedIn().collect { loggedIn ->
+                _state.update { it.copy(isLoggedIn = loggedIn) }
+            }
         }
     }
 

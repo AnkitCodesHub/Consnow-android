@@ -13,15 +13,7 @@ class BootReceiver : BroadcastReceiver() {
             val app = context.applicationContext as ConsnowApp
             val isLoggedIn = runBlocking { app.appContainer.tokenManager.getToken() != null }
             if (isLoggedIn) {
-                // After reboot, TYPE_STEP_COUNTER resets to 0.
-                // We preserve accumulated steps in SharedPreferences.
-                val prefs = context.getSharedPreferences("step_sensor_prefs", Context.MODE_PRIVATE)
-                val today = java.time.LocalDate.now().toString()
-                val savedDate = prefs.getString("sensor_date", null)
-                if (savedDate == today) {
-                    // Carry forward today's count as accumulated before reboot
-                    // The service will pick it up via KEY_ACCUMULATED
-                }
+                // Reboot carry-forward of today's steps is handled in StepCounterService.onSensorChanged
                 StepCounterService.start(context)
             }
         }

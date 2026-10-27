@@ -8,6 +8,10 @@ import com.Consnow.core.network.dto.RegisterRequest
 import com.Consnow.features.auth.domain.AuthRepository
 import android.content.Context
 import com.google.firebase.analytics.FirebaseAnalytics
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 
 class AuthRepositoryImpl(
     private val apiService: ApiService,
@@ -73,4 +77,26 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun isLoggedIn(): Boolean = tokenManager.getToken() != null
+
+    override fun observeLoggedIn(): Flow<Boolean> =
+        tokenManager.tokenFlow.map { it != null }.distinctUntilChanged()
+
+    override suspend fun refreshTokenIfStale() {
+        val token = tokenManager.getToken() ?: return
+        val issuedAt = tokenManager.issuedAtMs(token)
+        if (issuedAt != null && System.currentTimeMillis() - issuedAt < REFRESH_AFTER_MS) return
+        try {
+            val response = apiService.refreshToken()
+            val fresh = response.body()?.token
+            if (response.isSuccessful && fresh != null) tokenManager.saveToken(fresh)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            // offline: try again on the next call
+        }
+    }
+
+    private companion object {
+        const val REFRESH_AFTER_MS = 24 * 60 * 60 * 1000L
+    }
 }

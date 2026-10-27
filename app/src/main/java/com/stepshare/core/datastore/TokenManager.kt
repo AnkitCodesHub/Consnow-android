@@ -25,6 +25,13 @@ class TokenManager(private val context: Context) {
     val connectionCodeFlow: Flow<String?> = context.dataStore.data.map { it[CONNECTION_CODE_KEY] }
 
     suspend fun getToken(): String? = tokenFlow.first()
+
+    /** Issued-at time from the JWT payload, in epoch ms (null if unreadable). */
+    fun issuedAtMs(token: String): Long? = try {
+        val payload = token.split(".")[1]
+        val json = String(android.util.Base64.decode(payload, android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING or android.util.Base64.NO_WRAP))
+        org.json.JSONObject(json).optLong("iat", 0L).takeIf { it > 0 }?.times(1000)
+    } catch (_: Exception) { null }
     suspend fun getUserId(): String? = userIdFlow.first()
 
     suspend fun saveSession(token: String, userId: String, userName: String, connectionCode: String) {
@@ -34,6 +41,18 @@ class TokenManager(private val context: Context) {
             prefs[USER_NAME_KEY] = userName
             prefs[CONNECTION_CODE_KEY] = connectionCode
         }
+    }
+
+    suspend fun saveToken(token: String) {
+        context.dataStore.edit { it[TOKEN_KEY] = token }
+    }
+
+    /**
+     * Clears the session only if [expiredToken] is still the current token.
+     * Stops a late 401 from an old request wiping a token that was just refreshed.
+     */
+    suspend fun clearSessionIfToken(expiredToken: String) {
+        context.dataStore.edit { if (it[TOKEN_KEY] == expiredToken) it.clear() }
     }
 
     suspend fun clearSession() {

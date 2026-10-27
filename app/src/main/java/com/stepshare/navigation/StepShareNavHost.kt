@@ -43,6 +43,14 @@ fun ConsnowNavHost() {
             navController.navigate(Routes.HOME) {
                 popUpTo(Routes.AUTH) { inclusive = true }
             }
+        } else {
+            // Session ended (logout or expired token): back to login, clear the back stack
+            val current = navController.currentBackStackEntry?.destination?.route
+            if (current != null && current != Routes.AUTH) {
+                navController.navigate(Routes.AUTH) {
+                    popUpTo(navController.graph.id) { inclusive = true }
+                }
+            }
         }
     }
 

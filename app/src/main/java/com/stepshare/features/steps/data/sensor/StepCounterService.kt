@@ -25,6 +25,7 @@ import com.Consnow.core.network.SocketManager
 import com.Consnow.core.network.api.ApiService
 import com.Consnow.core.network.dto.LockEventRequest
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.distinctUntilChanged
 
 class StepCounterService : Service(), SensorEventListener {
 
@@ -64,6 +65,10 @@ class StepCounterService : Service(), SensorEventListener {
         private const val KEY_DATE = "sensor_date"
         private const val KEY_ACCUMULATED = "accumulated_steps"
         private const val KEY_LAST_STEP_AT = "last_step_at"
+        // Last raw sensor value seen. If a new reading is lower, the counter was reset (reboot).
+        private const val KEY_LAST_TOTAL = "last_sensor_total"
+        // Last computed step count for today, carried forward across a reboot.
+        private const val KEY_LAST_COUNT = "last_today_count"
         const val SYNC_INTERVAL_MS = 1_000L
         const val SYNC_DEBOUNCE_MS = 1_000L
         // 60s of no steps = inactive
@@ -101,13 +106,18 @@ class StepCounterService : Service(), SensorEventListener {
         startPeriodicSync()
         startActivityCheck()
 
-        // Connect WebSocket with JWT token for real-time peer events
+        // Connect WebSocket with the CURRENT JWT and reconnect whenever it changes.
+        // Before, the socket kept the token it started with: once that expired the
+        // server rejected it and live updates stopped until the app was reinstalled.
         val tokenManager = (application as ConsnowApp).appContainer.tokenManager
         serviceScope.launch {
-            val token = tokenManager.getToken() ?: ""
-            if (token.isNotEmpty()) {
-                socketManager = SocketManager(BuildConfig.API_BASE_URL, token)
-                socketManager?.connect()
+            tokenManager.tokenFlow.distinctUntilChanged().collect { token ->
+                socketManager?.disconnect()
+                socketManager = null
+                if (!token.isNullOrEmpty()) {
+                    socketManager = SocketManager(BuildConfig.API_BASE_URL, token)
+                    socketManager?.connect()
+                }
             }
         }
 
@@ -230,6 +240,8 @@ class StepCounterService : Service(), SensorEventListener {
                 delay(15_000)
                 try {
                     val app = application as ConsnowApp
+                    // Renews the JWT once a day while online, so active users never hit expiry
+                    app.appContainer.authRepository.refreshTokenIfStale()
                     val result = app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive)
                     Log.d("StepSync", "Sync completed: $result")
                 } catch (e: Exception) {
@@ -265,7 +277,7 @@ class StepCounterService : Service(), SensorEventListener {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val today = java.time.LocalDate.now().toString()
         val savedDate = prefs.getString(KEY_DATE, null)
-        prefs.edit().putLong(KEY_LAST_STEP_AT, lastStepAt).apply()
+        val lastTotal = prefs.getFloat(KEY_LAST_TOTAL, -1f)
 
         if (savedDate != today) {
             // New day — reset baseline so steps start from 0
@@ -274,6 +286,16 @@ class StepCounterService : Service(), SensorEventListener {
                 .putFloat(KEY_INITIAL_VALUE, totalSinceReboot)
                 .putString(KEY_DATE, today)
                 .putInt(KEY_ACCUMULATED, 0)
+                .putInt(KEY_LAST_COUNT, 0)
+                .apply()
+        } else if (lastTotal >= 0f && totalSinceReboot < lastTotal) {
+            // Sensor went backwards = phone rebooted today (TYPE_STEP_COUNTER restarts at 0).
+            // Keep the steps already counted today and count everything since boot on top.
+            // Previously the old baseline stayed, so today's count froze at 0 new steps.
+            initialSensorValue = 0f
+            prefs.edit()
+                .putFloat(KEY_INITIAL_VALUE, 0f)
+                .putInt(KEY_ACCUMULATED, prefs.getInt(KEY_LAST_COUNT, 0))
                 .apply()
         }
 
@@ -284,6 +306,12 @@ class StepCounterService : Service(), SensorEventListener {
 
         val todaySteps = (totalSinceReboot - (initialSensorValue ?: totalSinceReboot)).toInt()
             .coerceAtLeast(0) + prefs.getInt(KEY_ACCUMULATED, 0)
+
+        prefs.edit()
+            .putLong(KEY_LAST_STEP_AT, lastStepAt)
+            .putFloat(KEY_LAST_TOTAL, totalSinceReboot)
+            .putInt(KEY_LAST_COUNT, todaySteps)
+            .apply()
 
         if (todaySteps != lastSavedCount) {
             lastSavedCount = todaySteps

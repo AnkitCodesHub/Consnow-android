@@ -24,6 +24,10 @@ interface ApiService {
     @POST("auth/login")
     suspend fun login(@Body body: LoginRequest): Response<AuthResponse>
 
+    // Swaps a still-valid JWT for a fresh one (sliding session)
+    @POST("auth/refresh")
+    suspend fun refreshToken(): Response<TokenResponse>
+
     // Connections
     @POST("connections")
     suspend fun createConnection(@Body body: CreateConnectionRequest): Response<ConnectionResponse>
