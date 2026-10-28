@@ -1,0 +1,105 @@
+From 2166a50101cc85454460c4c609a432e47033f0af Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 28 Oct 2026 00:19:58 +0530
+Subject: [PATCH] Fix Home freezing after midnight and connections never
+ retrying
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01Mi9ypH9oLaXdbWP3CiTU1x
+---
+ .../presentation/ConnectionsViewModel.kt      | 21 +++++++++++++---
+ .../data/repository/StepsRepositoryImpl.kt    | 24 ++++++++++++++++---
+ 2 files changed, 39 insertions(+), 6 deletions(-)
+
+diff --git a/app/src/main/java/com/stepshare/features/connections/presentation/ConnectionsViewModel.kt b/app/src/main/java/com/stepshare/features/connections/presentation/ConnectionsViewModel.kt
+index 407ada7..7a84d34 100644
+--- a/app/src/main/java/com/stepshare/features/connections/presentation/ConnectionsViewModel.kt
++++ b/app/src/main/java/com/stepshare/features/connections/presentation/ConnectionsViewModel.kt
+@@ -11,6 +11,7 @@ import com.Consnow.features.connections.domain.usecase.GetConnectionsUseCase
+ import kotlinx.coroutines.flow.MutableStateFlow
+ import kotlinx.coroutines.flow.asStateFlow
+ import kotlinx.coroutines.flow.update
++import kotlinx.coroutines.delay
+ import kotlinx.coroutines.launch
+ 
+ class ConnectionsViewModel(
+@@ -25,6 +26,18 @@ class ConnectionsViewModel(
+     init {
+         loadConnectionCode()
+         loadConnections()
++        refreshPeriodically()
++    }
++
++    // The list used to load once. If the app opened while offline (e.g. in the morning
++    // before Wi-Fi/data came back), it stayed empty/errored until the app was reinstalled.
++    private fun refreshPeriodically() {
++        viewModelScope.launch {
++            while (true) {
++                delay(30_000)
++                loadConnections()
++            }
++        }
+     }
+ 
+     private fun loadConnectionCode() {
+@@ -37,10 +50,12 @@ class ConnectionsViewModel(
+ 
+     fun loadConnections() {
+         viewModelScope.launch {
+-            _state.update { it.copy(isLoading = true) }
++            // Only show the spinner when there is nothing to show yet (no flicker on refresh)
++            _state.update { it.copy(isLoading = it.connections.isEmpty()) }
+             when (val result = getConnectionsUseCase()) {
+-                is Result.Success -> _state.update { it.copy(isLoading = false, connections = result.data) }
+-                is Result.Error -> _state.update { it.copy(isLoading = false, error = result.message) }
++                is Result.Success -> _state.update { it.copy(isLoading = false, connections = result.data, error = null) }
++                // Offline: keep the last known list instead of replacing it with an error
++                is Result.Error -> _state.update { it.copy(isLoading = false, error = if (it.connections.isEmpty()) result.message else null) }
+                 else -> {}
+             }
+         }
+diff --git a/app/src/main/java/com/stepshare/features/steps/data/repository/StepsRepositoryImpl.kt b/app/src/main/java/com/stepshare/features/steps/data/repository/StepsRepositoryImpl.kt
+index ef63a26..7f50632 100644
+--- a/app/src/main/java/com/stepshare/features/steps/data/repository/StepsRepositoryImpl.kt
++++ b/app/src/main/java/com/stepshare/features/steps/data/repository/StepsRepositoryImpl.kt
+@@ -8,6 +8,11 @@ import com.Consnow.core.network.api.ApiService
+ import com.Consnow.core.network.dto.SyncStepsRequest
+ import com.Consnow.features.steps.domain.StepsRepository
+ import kotlinx.coroutines.CancellationException
++import kotlinx.coroutines.ExperimentalCoroutinesApi
++import kotlinx.coroutines.delay
++import kotlinx.coroutines.flow.distinctUntilChanged
++import kotlinx.coroutines.flow.flatMapLatest
++import kotlinx.coroutines.flow.flow
+ import kotlinx.coroutines.flow.Flow
+ import kotlinx.coroutines.sync.Mutex
+ import kotlinx.coroutines.sync.withLock
+@@ -22,9 +27,22 @@ class StepsRepositoryImpl(
+ 
+     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
+ 
+-    override fun observeTodaySteps(userId: String): Flow<StepRecordEntity?> {
+-        return stepRecordDao.observeRecord(userId, today())
+-    }
++    /**
++     * Follows "today" as the date changes. Previously the date was read once when the
++     * Home screen opened, so after midnight Home kept showing yesterday's row and never
++     * updated again until the app process died (which is what reinstalling did).
++     */
++    @OptIn(ExperimentalCoroutinesApi::class)
++    override fun observeTodaySteps(userId: String): Flow<StepRecordEntity?> =
++        currentDateFlow().flatMapLatest { date -> stepRecordDao.observeRecord(userId, date) }
++
++    // Emits the local date now and again whenever it changes (midnight, time zone change).
++    private fun currentDateFlow(): Flow<String> = flow {
++        while (true) {
++            emit(today())
++            delay(30_000)
++        }
++    }.distinctUntilChanged()
+ 
+     override suspend fun updateLocalSteps(userId: String, stepCount: Int) {
+         val date = today()
+-- 
+2.43.0
+

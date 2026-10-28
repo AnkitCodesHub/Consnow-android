@@ -11,6 +11,7 @@ import com.Consnow.features.connections.domain.usecase.GetConnectionsUseCase
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 class ConnectionsViewModel(
@@ -25,6 +26,18 @@ class ConnectionsViewModel(
     init {
         loadConnectionCode()
         loadConnections()
+        refreshPeriodically()
+    }
+
+    // The list used to load once. If the app opened while offline (e.g. in the morning
+    // before Wi-Fi/data came back), it stayed empty/errored until the app was reinstalled.
+    private fun refreshPeriodically() {
+        viewModelScope.launch {
+            while (true) {
+                delay(30_000)
+                loadConnections()
+            }
+        }
     }
 
     private fun loadConnectionCode() {
@@ -37,10 +50,12 @@ class ConnectionsViewModel(
 
     fun loadConnections() {
         viewModelScope.launch {
-            _state.update { it.copy(isLoading = true) }
+            // Only show the spinner when there is nothing to show yet (no flicker on refresh)
+            _state.update { it.copy(isLoading = it.connections.isEmpty()) }
             when (val result = getConnectionsUseCase()) {
-                is Result.Success -> _state.update { it.copy(isLoading = false, connections = result.data) }
-                is Result.Error -> _state.update { it.copy(isLoading = false, error = result.message) }
+                is Result.Success -> _state.update { it.copy(isLoading = false, connections = result.data, error = null) }
+                // Offline: keep the last known list instead of replacing it with an error
+                is Result.Error -> _state.update { it.copy(isLoading = false, error = if (it.connections.isEmpty()) result.message else null) }
                 else -> {}
             }
         }

@@ -1,0 +1,114 @@
+diff --git a/app/src/main/java/com/stepshare/core/database/dao/StepRecordDao.kt b/app/src/main/java/com/stepshare/core/database/dao/StepRecordDao.kt
+index 65b3be5..98e55fb 100644
+--- a/app/src/main/java/com/stepshare/core/database/dao/StepRecordDao.kt
++++ b/app/src/main/java/com/stepshare/core/database/dao/StepRecordDao.kt
+@@ -21,12 +21,21 @@ interface StepRecordDao {
+     @Insert(onConflict = OnConflictStrategy.REPLACE)
+     suspend fun upsert(record: StepRecordEntity): Long
+ 
+-    @Query("SELECT * FROM step_records WHERE sync_status = :status")
++    // Oldest day first, so a backlog from a long offline period is replayed in order.
++    @Query("SELECT * FROM step_records WHERE sync_status = :status ORDER BY date ASC")
+     suspend fun getRecordsByStatus(status: SyncStatus): List<StepRecordEntity>
+ 
+     @Query("UPDATE step_records SET sync_status = :status WHERE id = :id")
+     suspend fun updateSyncStatus(id: Long, status: SyncStatus)
+ 
++    /**
++     * Marks a record synced ONLY if its count is still the one we sent.
++     * If new steps landed while the request was in flight, the row is left
++     * PENDING so the newer count goes out on the next sync. Returns rows updated.
++     */
++    @Query("UPDATE step_records SET sync_status = :status WHERE id = :id AND step_count = :sentCount")
++    suspend fun markSyncedIfUnchanged(id: Long, sentCount: Int, status: SyncStatus): Int
++
+     @Query("UPDATE step_records SET step_count = :count, last_updated_at = :timestamp, sync_status = :status WHERE user_id = :userId AND date = :date")
+     suspend fun updateStepCount(userId: String, date: String, count: Int, timestamp: Long, status: SyncStatus)
+ }
+diff --git a/app/src/main/java/com/stepshare/core/network/dto/StepsDtos.kt b/app/src/main/java/com/stepshare/core/network/dto/StepsDtos.kt
+index 5fd0473..e745184 100644
+--- a/app/src/main/java/com/stepshare/core/network/dto/StepsDtos.kt
++++ b/app/src/main/java/com/stepshare/core/network/dto/StepsDtos.kt
+@@ -1,6 +1,13 @@
+ package com.Consnow.core.network.dto
+ 
+-data class SyncStepsRequest(val stepCount: Int, val date: String, val isActive : Boolean = false)
++data class SyncStepsRequest(
++    val stepCount: Int,
++    val date: String,
++    val isActive: Boolean = false,
++    // Device epoch ms of the last step in this count. Lets the server stamp
++    // lastActiveAt with when the user walked, not when the phone got back online.
++    val lastStepAt: Long? = null,
++)
+ 
+ data class MyStepsResponse(
+     val date: String,
+diff --git a/app/src/main/java/com/stepshare/features/steps/data/repository/StepsRepositoryImpl.kt b/app/src/main/java/com/stepshare/features/steps/data/repository/StepsRepositoryImpl.kt
+index 39ed4c1..ef63a26 100644
+--- a/app/src/main/java/com/stepshare/features/steps/data/repository/StepsRepositoryImpl.kt
++++ b/app/src/main/java/com/stepshare/features/steps/data/repository/StepsRepositoryImpl.kt
+@@ -7,7 +7,10 @@ import com.Consnow.core.database.entity.SyncStatus
+ import com.Consnow.core.network.api.ApiService
+ import com.Consnow.core.network.dto.SyncStepsRequest
+ import com.Consnow.features.steps.domain.StepsRepository
++import kotlinx.coroutines.CancellationException
+ import kotlinx.coroutines.flow.Flow
++import kotlinx.coroutines.sync.Mutex
++import kotlinx.coroutines.sync.withLock
+ import java.time.LocalDate
+ import java.time.format.DateTimeFormatter
+ import com.Consnow.features.steps.domain.MyStepsResult
+@@ -49,23 +52,43 @@ class StepsRepositoryImpl(
+         }
+     }
+ 
+-    override suspend fun syncPendingToServer(isActive: Boolean): Result<Int> {
++    // The 15s loop, the debounced step sync and SyncWorker all call this. When the
++    // network comes back they fire together; serialize them so requests leave in order.
++    private val syncMutex = Mutex()
++
++    override suspend fun syncPendingToServer(isActive: Boolean): Result<Int> = syncMutex.withLock {
+         val pending = stepRecordDao.getRecordsByStatus(SyncStatus.PENDING)
+-        if (pending.isEmpty()) return Result.Success(0)
++        if (pending.isEmpty()) return@withLock Result.Success(0)
+ 
++        val today = today()
+         var synced = 0
+         for (record in pending) {
+-            try {
+-                val response = apiService.syncSteps(
+-                    SyncStepsRequest(stepCount = record.stepCount, date = record.date,isActive = isActive)
++            val response = try {
++                apiService.syncSteps(
++                    SyncStepsRequest(
++                        stepCount = record.stepCount,
++                        date = record.date,
++                        // A past day's backlog is never "walking now"
++                        isActive = isActive && record.date == today,
++                        lastStepAt = record.lastUpdatedAt,
++                    )
+                 )
+-                if (response.isSuccessful) {
+-                    stepRecordDao.updateSyncStatus(record.id, SyncStatus.SYNCED)
++            } catch (e: CancellationException) {
++                throw e
++            } catch (_: Exception) {
++                break // still offline: stop here, everything stays PENDING for the next run
++            }
++
++            if (response.isSuccessful) {
++                // Only clear PENDING if no newer steps were written during the request.
++                if (stepRecordDao.markSyncedIfUnchanged(record.id, record.stepCount, SyncStatus.SYNCED) > 0) {
+                     synced++
+                 }
+-            } catch (_: Exception) { }
++            } else if (response.code() == 401) {
++                break // token expired: keep data PENDING until the user logs in again
++            }
+         }
+-        return Result.Success(synced)
++        Result.Success(synced)
+     }
+ 
+     override suspend fun getPeerSteps(peerId: String): Result<PeerStepsResult> {

@@ -7,7 +7,15 @@ import com.Consnow.core.database.entity.SyncStatus
 import com.Consnow.core.network.api.ApiService
 import com.Consnow.core.network.dto.SyncStepsRequest
 import com.Consnow.features.steps.domain.StepsRepository
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.ExperimentalCoroutinesApi
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flow
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import com.Consnow.features.steps.domain.MyStepsResult
@@ -19,9 +27,22 @@ class StepsRepositoryImpl(
 
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
 
-    override fun observeTodaySteps(userId: String): Flow<StepRecordEntity?> {
-        return stepRecordDao.observeRecord(userId, today())
-    }
+    /**
+     * Follows "today" as the date changes. Previously the date was read once when the
+     * Home screen opened, so after midnight Home kept showing yesterday's row and never
+     * updated again until the app process died (which is what reinstalling did).
+     */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    override fun observeTodaySteps(userId: String): Flow<StepRecordEntity?> =
+        currentDateFlow().flatMapLatest { date -> stepRecordDao.observeRecord(userId, date) }
+
+    // Emits the local date now and again whenever it changes (midnight, time zone change).
+    private fun currentDateFlow(): Flow<String> = flow {
+        while (true) {
+            emit(today())
+            delay(30_000)
+        }
+    }.distinctUntilChanged()
 
     override suspend fun updateLocalSteps(userId: String, stepCount: Int) {
         val date = today()
@@ -49,23 +70,43 @@ class StepsRepositoryImpl(
         }
     }
 
-    override suspend fun syncPendingToServer(isActive: Boolean): Result<Int> {
-        val pending = stepRecordDao.getRecordsByStatus(SyncStatus.PENDING)
-        if (pending.isEmpty()) return Result.Success(0)
+    // The 15s loop, the debounced step sync and SyncWorker all call this. When the
+    // network comes back they fire together; serialize them so requests leave in order.
+    private val syncMutex = Mutex()
 
+    override suspend fun syncPendingToServer(isActive: Boolean): Result<Int> = syncMutex.withLock {
+        val pending = stepRecordDao.getRecordsByStatus(SyncStatus.PENDING)
+        if (pending.isEmpty()) return@withLock Result.Success(0)
+
+        val today = today()
         var synced = 0
         for (record in pending) {
-            try {
-                val response = apiService.syncSteps(
-                    SyncStepsRequest(stepCount = record.stepCount, date = record.date,isActive = isActive)
+            val response = try {
+                apiService.syncSteps(
+                    SyncStepsRequest(
+                        stepCount = record.stepCount,
+                        date = record.date,
+                        // A past day's backlog is never "walking now"
+                        isActive = isActive && record.date == today,
+                        lastStepAt = record.lastUpdatedAt,
+                    )
                 )
-                if (response.isSuccessful) {
-                    stepRecordDao.updateSyncStatus(record.id, SyncStatus.SYNCED)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+                break // still offline: stop here, everything stays PENDING for the next run
+            }
+
+            if (response.isSuccessful) {
+                // Only clear PENDING if no newer steps were written during the request.
+                if (stepRecordDao.markSyncedIfUnchanged(record.id, record.stepCount, SyncStatus.SYNCED) > 0) {
                     synced++
                 }
-            } catch (_: Exception) { }
+            } else if (response.code() == 401) {
+                break // token expired: keep data PENDING until the user logs in again
+            }
         }
-        return Result.Success(synced)
+        Result.Success(synced)
     }
 
     override suspend fun getPeerSteps(peerId: String): Result<PeerStepsResult> {
