@@ -2,6 +2,17 @@
 package com.Consnow.features.steps.presentation
 
 import android.Manifest
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.ui.platform.LocalContext
+import androidx.core.content.ContextCompat
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -59,27 +70,49 @@ fun HomeScreen(
     ownLastUnlockedAtMs: Long = 0L,
     peerStatuses: Map<String, PeerLiveStatus> = emptyMap(),
 ) {
-    val permissionLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        onPermissionResult(granted)
+    val context = LocalContext.current
+
+    // Ask for everything in ONE request. Two separate launch() calls at the same moment
+    // make Android drop the second one (reported as denied, no dialog shown), so on a
+    // fresh install Activity Recognition was never asked and steps didn't count.
+    val permissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        // Steps need Activity Recognition. Notifications are requested too, but a "no"
+        // there doesn't stop step counting.
+        val activityGranted = Build.VERSION.SDK_INT < Build.VERSION_CODES.Q ||
+            results[Manifest.permission.ACTIVITY_RECOGNITION] == true ||
+            ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
+                PackageManager.PERMISSION_GRANTED
+        onPermissionResult(activityGranted)
     }
 
-    val notificationPermLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestPermission()
-    ) { /* granted or not, we don't block the service on it */ }
-
     LaunchedEffect(Unit) {
-        // Request POST_NOTIFICATIONS on Android 13+ so the foreground
-        // service notification is allowed (required or the service is killed).
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        val needed = buildList {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) add(Manifest.permission.ACTIVITY_RECOGNITION)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) add(Manifest.permission.POST_NOTIFICATIONS)
         }
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            permissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
-        } else {
-            onPermissionResult(true)
+        if (needed.isEmpty()) onPermissionResult(true)
+        else permissionsLauncher.launch(needed.toTypedArray())
+    }
+
+    // Coming back from the Settings page: if the user switched Activity Recognition on
+    // there, start counting straight away instead of waiting for the next app launch.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val currentlyGranted by rememberUpdatedState(stepsState.permissionGranted)
+    val currentOnPermissionResult by rememberUpdatedState(onPermissionResult)
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME && !currentlyGranted &&
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                ContextCompat.checkSelfPermission(context, Manifest.permission.ACTIVITY_RECOGNITION) ==
+                    PackageManager.PERMISSION_GRANTED
+            ) {
+                currentOnPermissionResult(true)
+            }
         }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     // Friends split into online / offline for the list below
@@ -121,7 +154,7 @@ fun HomeScreen(
                     "Sensor unavailable" to MaterialTheme.colorScheme.error
 
                 !stepsState.permissionGranted ->
-                    "Permission required" to MaterialTheme.colorScheme.error
+                    "Permission required · Tap to allow" to MaterialTheme.colorScheme.error
 
                 stepsState.syncStatus == SyncStatus.SYNCED ->
                     "Synced" to MaterialTheme.colorScheme.primary
@@ -133,7 +166,18 @@ fun HomeScreen(
 
             Surface(
                 modifier = Modifier.clickable {
-                    onSync()
+                    if (!stepsState.permissionGranted) {
+                        // After a "Don't allow", Android may never show the popup again,
+                        // so send the user to this app's settings page to switch it on.
+                        context.startActivity(
+                            Intent(
+                                Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                                Uri.fromParts("package", context.packageName, null)
+                            ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        )
+                    } else {
+                        onSync()
+                    }
                 },
                 shape = RoundedCornerShape(20.dp),
                 color = statusColor.copy(alpha = 0.12f)
