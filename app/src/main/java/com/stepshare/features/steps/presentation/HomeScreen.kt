@@ -58,11 +58,18 @@ fun HomeScreen(
         onPermissionResult(granted)
     }
 
+    val notificationPermLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { /* granted or not, we don't block the service on it */ }
+
     LaunchedEffect(Unit) {
+        // Request POST_NOTIFICATIONS on Android 13+ so the foreground
+        // service notification is allowed (required or the service is killed).
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            notificationPermLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            permissionLauncher.launch(
-                Manifest.permission.ACTIVITY_RECOGNITION
-            )
+            permissionLauncher.launch(Manifest.permission.ACTIVITY_RECOGNITION)
         } else {
             onPermissionResult(true)
         }
@@ -340,14 +347,12 @@ private fun PeerCard(
         }
     }
 }
-
+//updated the timnestamp function
 private fun formatPeerTimeAgo(isoTimestamp: String): String {
     return try {
-        val sdf = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US)
-        sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-        val then = sdf.parse(isoTimestamp)?.time ?: return "Unknown"
-        val now = System.currentTimeMillis()
-        val diffMs = now - then
+        val then = java.time.Instant.parse(isoTimestamp).toEpochMilli()
+        val diffMs = System.currentTimeMillis() - then
+        if (diffMs < 0) return "just now"
         val minutes = diffMs / 60_000
         val hours = minutes / 60
         when {

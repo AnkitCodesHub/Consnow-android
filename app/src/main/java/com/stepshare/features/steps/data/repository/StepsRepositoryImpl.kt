@@ -93,8 +93,9 @@ class StepsRepositoryImpl(
                 )
             } catch (e: CancellationException) {
                 throw e
-            } catch (_: Exception) {
-                break // still offline: stop here, everything stays PENDING for the next run
+            } catch (e: Exception) {
+                android.util.Log.e("StepSync", "Sync network error: ${e.javaClass.simpleName}: ${e.message}")
+                break
             }
 
             if (response.isSuccessful) {

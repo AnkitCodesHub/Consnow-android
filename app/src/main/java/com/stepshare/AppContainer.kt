@@ -75,7 +75,7 @@ class AppContainer(context: Context) {
     }
 
     val connectionsRepository: ConnectionsRepository by lazy {
-        ConnectionsRepositoryImpl(apiService)
+        ConnectionsRepositoryImpl(apiService, context)
     }
 
     val stepsRepository: StepsRepository by lazy {

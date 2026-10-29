@@ -234,12 +234,14 @@ class StepCounterService : Service(), SensorEventListener {
     }
 
     // Polls step sync every 15s as fallback when foreground service is killed by OxygenOS
-    private fun startPeriodicSync() {
+    private fun startPeriodicSync() { //edited on 29/0ctober/2026 to prevent midnight freeze
         serviceScope.launch {
             while (true) {
                 delay(15_000)
                 try {
                     val app = application as ConsnowApp
+                    // Reset baseline if day rolled over while phone was idle (no steps = no sensor event)
+                    checkAndResetForNewDay()
                     // Renews the JWT once a day while online, so active users never hit expiry
                     app.appContainer.authRepository.refreshTokenIfStale()
                     val result = app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive)
@@ -248,6 +250,23 @@ class StepCounterService : Service(), SensorEventListener {
                     Log.e("StepSync", "Sync failed: ${e.message}")
                 }
             }
+        }
+    }
+
+    private fun checkAndResetForNewDay() {
+        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val savedDate = prefs.getString(KEY_DATE, null)
+        val today = java.time.LocalDate.now().toString()
+        if (savedDate != null && savedDate != today) {
+            // Day changed while idle — reset in-memory baseline so next step event starts from 0
+            initialSensorValue = null
+            lastSavedCount = 0
+            prefs.edit()
+                .putString(KEY_DATE, today)
+                .putInt(KEY_ACCUMULATED, 0)
+                .putInt(KEY_LAST_COUNT, 0)
+                .apply()
+            Log.d("StepSync", "New day detected in periodic sync, baseline reset")
         }
     }
 

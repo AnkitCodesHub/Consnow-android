@@ -147,15 +147,12 @@ fun PeerStepsScreen(
 // Converts an ISO timestamp into a relative time string.
 fun formatTimeAgo(isoTimestamp: String): String {
     return try {
-        val sdf = java.text.SimpleDateFormat(
-            "yyyy-MM-dd'T'HH:mm:ss",
-            java.util.Locale.US
-        ).apply {
-            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        val instant = try {
+            java.time.Instant.parse(isoTimestamp)
+        } catch (_: Exception) {
+            return "Unknown"
         }
-
-        val then = sdf.parse(isoTimestamp)?.time
-            ?: return "Unknown"
+        val then = instant.toEpochMilli()
 
         val diffMs = System.currentTimeMillis() - then
 
