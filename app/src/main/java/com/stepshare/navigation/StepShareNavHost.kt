@@ -88,6 +88,15 @@ fun ConsnowNavHost() {
             val ownIsLocked by stepsViewModel.ownIsLocked.collectAsState()
             val ownLastUnlockedAtMs by stepsViewModel.ownLastUnlockedAtMs.collectAsState()
 
+            // Steps + lock/online status for each friend in the Home list
+            val peerStatusesViewModel: PeerStatusesViewModel = viewModel(
+                factory = PeerStatusesViewModel.Factory(c.getPeerStepsUseCase, c.apiService)
+            )
+            val peerStatuses by peerStatusesViewModel.statuses.collectAsState()
+            LaunchedEffect(connectionsState.connections) {
+                peerStatusesViewModel.track(connectionsState.connections.map { it.id })
+            }
+
             HomeScreen(
                 stepsState = stepsState,
                 connectionsState = connectionsState,
@@ -115,6 +124,7 @@ fun ConsnowNavHost() {
                 },
                 ownIsLocked = ownIsLocked,
                 ownLastUnlockedAtMs = ownLastUnlockedAtMs,
+                peerStatuses = peerStatuses,
             )
         }
 
