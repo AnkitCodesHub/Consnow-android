@@ -14,7 +14,14 @@ svc_running() { adb shell dumpsys activity services "$PKG" | grep -q "StepCounte
 
 device() {
   echo "== Device =="
-  [ "$(adb get-state 2>/dev/null)" = "device" ] || { echo "No phone found (adb devices). Enable USB debugging and accept the prompt."; exit 1; }
+  command -v adb >/dev/null || { echo "adb not found. Run: export PATH=\"\$PATH:\$HOME/Library/Android/sdk/platform-tools\""; exit 1; }
+  state=$(adb get-state 2>&1)
+  if [ "$state" != "device" ]; then
+    echo "adb could not pick a phone. adb said: $state"
+    echo "Devices adb sees:"; adb devices -l
+    echo "If more than one is listed, re-run with: ANDROID_SERIAL=<serial from the list> $0 device"
+    exit 1
+  fi
   echo "  $(adb shell getprop ro.product.manufacturer) $(adb shell getprop ro.product.model), Android $(adb shell getprop ro.build.version.release) (API $(adb shell getprop ro.build.version.sdk))"
   ver=$(adb shell dumpsys package $PKG | grep -m1 versionName | tr -d ' ')
   code=$(adb shell dumpsys package $PKG | grep -m1 -o 'versionCode=[0-9]*')

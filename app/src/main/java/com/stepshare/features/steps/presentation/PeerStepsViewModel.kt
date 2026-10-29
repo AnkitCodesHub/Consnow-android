@@ -1,6 +1,7 @@
 package com.Consnow.features.steps.presentation
 
 import android.util.Log
+import com.Consnow.BuildConfig
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -69,10 +70,10 @@ class PeerStepsViewModel(
         viewModelScope.launch {
             try {
                 val response = apiService.getPeerActivity(peerId)
-                Log.d("PeerLock", "code=${response.code()} body=${response.body()}")
+                if (BuildConfig.DEBUG) Log.d("PeerLock", "code=${response.code()} body=${response.body()}")
                 if (response.isSuccessful) {
                     response.body()?.let { body ->
-                        Log.d("PeerLock", "isLocked=${body.isLocked} unlockedAt=${body.unlockedAt}")
+                        if (BuildConfig.DEBUG) Log.d("PeerLock", "isLocked=${body.isLocked} unlockedAt=${body.unlockedAt}")
                         _isLocked.value = if (!body.isOnline) true else body.isLocked
                         _isOnline.value = body.isOnline
                         body.unlockedAt?.let { iso ->

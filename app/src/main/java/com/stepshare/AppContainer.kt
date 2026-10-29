@@ -46,7 +46,11 @@ class AppContainer(context: Context) {
         OkHttpClient.Builder()
             .addInterceptor(AuthInterceptor(tokenManager))
             .addInterceptor(HttpLoggingInterceptor().apply {
-                level = HttpLoggingInterceptor.Level.BODY
+                // Release builds log nothing: logcat is readable over USB and would expose
+                // friends' user IDs and the login token. Debug builds log bodies, token hidden.
+                level = if (BuildConfig.DEBUG) HttpLoggingInterceptor.Level.BODY
+                        else HttpLoggingInterceptor.Level.NONE
+                redactHeader("Authorization")
             })
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(30, TimeUnit.SECONDS)

@@ -13,9 +13,13 @@ android {
         applicationId = "com.Consnow"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.0.0"
+        versionCode = 3
+        versionName = "1.1.0"
         buildConfigField("String", "API_BASE_URL", "\"https://consnow-backend-production.up.railway.app/\"")
+    }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
     }
 
     buildFeatures {
@@ -72,5 +76,6 @@ dependencies {
     }
 
     testImplementation("junit:junit:4.13.2")
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.7.3")
 
 }
