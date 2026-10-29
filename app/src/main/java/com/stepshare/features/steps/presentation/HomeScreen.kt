@@ -38,6 +38,14 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.foundation.border
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import kotlinx.coroutines.delay
+import androidx.compose.ui.graphics.luminance
 
 @Composable
 fun HomeScreen(
@@ -51,6 +59,7 @@ fun HomeScreen(
     onDeleteAccount: () -> Unit, //option to delete account
     ownIsLocked: Boolean = true,
     ownLastUnlockedAtMs: Long = 0L,
+    peerStatuses: Map<String, PeerLiveStatus> = emptyMap(),
 ) {
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
@@ -73,6 +82,12 @@ fun HomeScreen(
         } else {
             onPermissionResult(true)
         }
+    }
+
+    // Friends split into online / offline for the list below
+    val fp = friendsPalette()
+    val (onlinePeers, offlinePeers) = remember(connectionsState.connections, peerStatuses) {
+        connectionsState.connections.partition { peerStatuses[it.id]?.isOnline == true }
     }
 
     LazyColumn(
@@ -204,21 +219,44 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(32.dp))
 
-            // Connected peers header
+            // Friends header with online / offline counts
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "Connected",
-                    style = MaterialTheme.typography.titleLarge
-                )
+                Column {
+                    Text(
+                        text = "Friends",
+                        fontSize = 30.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = fp.ink
+                    )
+                    if (connectionsState.connections.isNotEmpty()) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(fp.onlineDot))
+                            Text("${onlinePeers.size} online", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fp.body)
+                            Spacer(Modifier.width(6.dp))
+                            Box(Modifier.size(8.dp).clip(CircleShape).background(fp.offlineDot))
+                            Text("${offlinePeers.size} offline", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fp.body)
+                        }
+                    }
+                }
 
-                TextButton(
-                    onClick = onConnectClick
+                Surface(
+                    onClick = onConnectClick,
+                    shape = RoundedCornerShape(14.dp),
+                    color = fp.addBg,
+                    modifier = Modifier
+                        .size(44.dp)
+                        .semantics { contentDescription = "Add friend" }
                 ) {
-                    Text(text = "Add")
+                    Box(contentAlignment = Alignment.Center) {
+                        Text("+", color = fp.addFg, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
 
@@ -247,18 +285,19 @@ fun HomeScreen(
                 }
             }
         } else {
-            items(
-                items = connectionsState.connections,
-                key = { peer -> peer.id }
-            ) { peer ->
-                PeerCard(
-                    peer = peer,
-                    onClick = {
-                        onPeerClick(peer)
-                    }
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
+            if (onlinePeers.isNotEmpty()) {
+                item { FriendsSectionLabel("Online now") }
+                items(items = onlinePeers, key = { peer -> peer.id }, contentType = { "friend" }) { peer ->
+                    FriendCard(peer = peer, status = peerStatuses[peer.id], onClick = { onPeerClick(peer) })
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+            }
+            if (offlinePeers.isNotEmpty()) {
+                item { FriendsSectionLabel("Offline") }
+                items(items = offlinePeers, key = { peer -> peer.id }, contentType = { "friend" }) { peer ->
+                    FriendCard(peer = peer, status = peerStatuses[peer.id], onClick = { onPeerClick(peer) })
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
             }
         }
 
@@ -297,56 +336,211 @@ fun HomeScreen(
 
 }
 
+// ── Friends list (design: "Consnow Peers Online Dot") ───────────────────────
+/** Friends list colors — light and dark, following the app theme (system setting). */
+private data class FriendsPalette(
+    val ink: Color, val body: Color, val muted: Color,
+    val card: Color, val boxBg: Color,
+    val onlineDot: Color, val onlineText: Color, val onlineHalo: Color,
+    val offlineDot: Color, val offlineText: Color,
+    val avatars: List<Color>, val offlineAvatar: Color, val checkingDot: Color,
+    val addBg: Color, val addFg: Color,
+)
+
+private val LightFriends = FriendsPalette(
+    ink = Color(0xFF16181D), body = Color(0xFF4A505B), muted = Color(0xFF5F6672),
+    card = Color(0xFFFFFFFF), boxBg = Color(0xFFF4F5F2),
+    onlineDot = Color(0xFF16A34A), onlineText = Color(0xFF15803D), onlineHalo = Color(0x2E16A34A),
+    offlineDot = Color(0xFFDC2626), offlineText = Color(0xFFB91C1C),
+    avatars = listOf(Color(0xFFFDE7C8), Color(0xFFD6E4FF), Color(0xFFDCF2E3), Color(0xFFF3DDF7)),
+    offlineAvatar = Color(0xFFE6E7E3), checkingDot = Color(0xFF9CA3AF),
+    addBg = Color(0xFF16181D), addFg = Color(0xFFFFFFFF),
+)
+
+private val DarkFriends = FriendsPalette(
+    ink = Color(0xFFF1F5F9), body = Color(0xFFCBD5E1), muted = Color(0xFF94A3B8),
+    card = Color(0xFF1E293B), boxBg = Color(0xFF0F172A),
+    onlineDot = Color(0xFF22C55E), onlineText = Color(0xFF4ADE80), onlineHalo = Color(0x3322C55E),
+    offlineDot = Color(0xFFEF4444), offlineText = Color(0xFFF87171),
+    avatars = listOf(Color(0xFF5B4325), Color(0xFF26375E), Color(0xFF1F4A33), Color(0xFF4A2E55)),
+    offlineAvatar = Color(0xFF334155), checkingDot = Color(0xFF64748B),
+    addBg = Color(0xFFF1F5F9), addFg = Color(0xFF0F172A),
+)
+
 @Composable
-private fun PeerCard(
+private fun friendsPalette(): FriendsPalette =
+    // Follow whatever theme the app is actually drawing (dark background => dark palette)
+    if (MaterialTheme.colorScheme.background.luminance() < 0.5f) DarkFriends else LightFriends
+
+@Composable
+private fun FriendsSectionLabel(text: String) {
+    val fp = friendsPalette()
+    Text(
+        text = text.uppercase(),
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        letterSpacing = 1.sp,
+        color = fp.muted,
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, top = 12.dp, bottom = 8.dp)
+    )
+}
+
+@Composable
+private fun FriendCard(
     peer: PeerInfo,
+    status: PeerLiveStatus?,
     onClick: () -> Unit
 ) {
+    val fp = friendsPalette()
+    val isOnline = status?.isOnline == true
+    val isLocked = status?.isLocked ?: true
+
+    val statusLine = when {
+        status == null -> "Checking…"
+        isOnline -> "Online · now"
+        else -> "Offline"
+    }
+    val initials = remember(peer.name) {
+        peer.name.trim().split(" ").filter { it.isNotEmpty() }
+            .take(2).joinToString("") { it.first().uppercase() }.ifEmpty { "?" }
+    }
+    val stepsText = remember(status?.stepCount) {
+        status?.stepCount?.let { java.text.NumberFormat.getIntegerInstance().format(it) } ?: "—"
+    }
+
     Surface(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        color = MaterialTheme.colorScheme.surface,
-        tonalElevation = 1.dp
+        shape = RoundedCornerShape(18.dp),
+        color = fp.card
     ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Box(
-                modifier = Modifier
-                    .size(40.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(MaterialTheme.colorScheme.primaryContainer),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = peer.name.firstOrNull()?.uppercaseChar()?.toString() ?: "?",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.primary
-                )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Avatar with status dot
+                Box(modifier = Modifier.size(48.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(48.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (isOnline) fp.avatars[(peer.id.hashCode() and 0x7fffffff) % fp.avatars.size]
+                                else fp.offlineAvatar
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = initials,
+                            fontSize = 17.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isOnline) fp.ink else fp.body
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .offset(x = 3.dp, y = 3.dp)
+                            .size(22.dp)
+                            .clip(CircleShape)
+                            .background(if (isOnline) fp.onlineHalo else Color.Transparent),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(16.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        status == null -> fp.checkingDot
+                                        isOnline -> fp.onlineDot
+                                        else -> fp.offlineDot
+                                    }
+                                )
+                                .border(3.dp, fp.card, CircleShape)
+                                .semantics { contentDescription = if (isOnline) "Online" else "Offline" }
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(peer.name, fontSize = 16.sp, fontWeight = FontWeight.Bold, color = fp.ink)
+                    Text(
+                        text = statusLine,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = when {
+                            status == null -> fp.muted
+                            isOnline -> fp.onlineText
+                            else -> fp.offlineText
+                        }
+                    )
+                }
             }
 
-            Spacer(modifier = Modifier.width(16.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(text = peer.name, style = MaterialTheme.typography.bodyLarge)
-                Text(
-                    text = if (peer.sharingEnabled) "Sharing steps" else "Sharing paused",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FriendStat("Steps", stepsText, Modifier.weight(1f))
+                FriendStat("Phone", if (status == null) "—" else if (isLocked) "Locked" else "Unlocked", Modifier.weight(1f))
+                LastUnlockStat(status = status, isLocked = isLocked, modifier = Modifier.weight(1f))
             }
-
-            Text(
-                text = "→",
-                style = MaterialTheme.typography.titleLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
         }
     }
 }
+
+@Composable
+private fun FriendStat(label: String, value: String, modifier: Modifier = Modifier) {
+    val fp = friendsPalette()
+    Column(
+        modifier = modifier
+            .clip(RoundedCornerShape(12.dp))
+            .background(fp.boxBg)
+            .padding(10.dp)
+    ) {
+        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = fp.muted)
+        Text(value, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = fp.ink, maxLines = 1)
+    }
+}
+
+/**
+ * "Last unlock" box. Owns its own 1-second ticker so only this text
+ * recomposes each second (not the whole card), and the ticker runs only
+ * while the phone is locked and a timestamp exists.
+ */
+@Composable
+private fun LastUnlockStat(status: PeerLiveStatus?, isLocked: Boolean, modifier: Modifier = Modifier) {
+    val unlockedAt = status?.lastUnlockedAtMs ?: 0L
+    val needsTicker = status != null && isLocked && unlockedAt > 0L
+    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    if (needsTicker) {
+        LaunchedEffect(unlockedAt) {
+            while (true) {
+                now = System.currentTimeMillis()
+                delay(1_000)
+            }
+        }
+    }
+    val text = when {
+        status == null -> "—"
+        !isLocked -> "now"
+        unlockedAt <= 0L -> "—"
+        else -> friendElapsed(((now - unlockedAt) / 1000).coerceAtLeast(0))
+    }
+    FriendStat("Last unlock", text, modifier)
+}
+
+private fun friendElapsed(s: Long): String = when {
+    s < 60 -> "${s}s ago"
+    s < 3_600 -> "${s / 60}m ago"
+    s < 86_400 -> "${s / 3_600}h ago"
+    else -> "${s / 86_400}d ago"
+}
+
 //updated the timnestamp function
 private fun formatPeerTimeAgo(isoTimestamp: String): String {
     return try {

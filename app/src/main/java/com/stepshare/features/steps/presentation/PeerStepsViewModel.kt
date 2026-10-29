@@ -29,6 +29,11 @@ class PeerStepsViewModel(
     private val _isLocked = MutableStateFlow(true)
     val isLocked: StateFlow<Boolean> = _isLocked.asStateFlow()
 
+    // Whether the peer is online (heartbeat received in the last 90s).
+    // Defaults to false — treat unknown state as offline.
+    private val _isOnline = MutableStateFlow(false)
+    val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
+
     // Epoch millis of peer's last unlock — fed into LockStatusWidget timer.
     // Only ever moves forward via applyTimestamp() to prevent stale overwrites.
     private val _lastUnlockedAtMs = MutableStateFlow(0L)
@@ -69,6 +74,7 @@ class PeerStepsViewModel(
                     response.body()?.let { body ->
                         Log.d("PeerLock", "isLocked=${body.isLocked} unlockedAt=${body.unlockedAt}")
                         _isLocked.value = if (!body.isOnline) true else body.isLocked
+                        _isOnline.value = body.isOnline
                         body.unlockedAt?.let { iso ->
                             applyTimestamp(Instant.parse(iso).toEpochMilli())
                         }
@@ -77,6 +83,7 @@ class PeerStepsViewModel(
             } catch (e: Exception) {
                 Log.e("PeerLock", "fetchPeerActivity failed: ${e.message}")
                 _isLocked.value = true  // offline — show as locked
+                _isOnline.value = false
             }
         }
     }
@@ -132,6 +139,7 @@ class PeerStepsViewModel(
                     if (response.isSuccessful) {
                         response.body()?.let { body ->
                             _isLocked.value = if (!body.isOnline) true else body.isLocked
+                            _isOnline.value = body.isOnline
                             body.unlockedAt?.let { iso ->
                                 applyTimestamp(Instant.parse(iso).toEpochMilli())
                             }
@@ -139,6 +147,7 @@ class PeerStepsViewModel(
                     }
                 } catch (_: Exception) {
                     _isLocked.value = true  // offline — show as locked
+                    _isOnline.value = false
                 }
             }
         }

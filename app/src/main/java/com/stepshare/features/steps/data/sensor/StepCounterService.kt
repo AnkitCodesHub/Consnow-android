@@ -132,8 +132,9 @@ class StepCounterService : Service(), SensorEventListener {
                 OwnLockStatusEvent(isLocked = initiallyLocked, timestamp = 0L)
             )
         }
-        // If already unlocked when service starts, begin heartbeat immediately
-        if (!initiallyLocked) startHeartbeat()
+        // Heartbeat runs whether locked or unlocked, so friends see us as
+        // online whenever the phone has internet (lock state is reported separately)
+        startHeartbeat()
 
         // Register BroadcastReceiver for lock/unlock transitions.
         // ACTION_USER_PRESENT fires when the user dismisses the lock screen.
@@ -198,7 +199,7 @@ class StepCounterService : Service(), SensorEventListener {
      * 3. POST to server with the exact transition timestamp
      */
     private suspend fun reportLock(at: Long) {
-        stopHeartbeat()
+        // Heartbeat keeps running while locked so we still show as online
         ActivityEventBus.emitOwnLockStatus(OwnLockStatusEvent(isLocked = true, timestamp = at))
         try {
             apiService.reportLock(LockEventRequest(occurredAt = at))
