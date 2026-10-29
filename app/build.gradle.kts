@@ -71,4 +71,6 @@ dependencies {
         exclude(group = "org.json", module = "json")
     }
 
+    testImplementation("junit:junit:4.13.2")
+
 }
