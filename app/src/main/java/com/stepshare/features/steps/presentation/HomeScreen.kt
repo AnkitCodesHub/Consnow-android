@@ -38,13 +38,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.foundation.border
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
-import kotlinx.coroutines.delay
 import androidx.compose.ui.graphics.luminance
 
 @Composable
@@ -395,7 +393,6 @@ private fun FriendCard(
 ) {
     val fp = friendsPalette()
     val isOnline = status?.isOnline == true
-    val isLocked = status?.isLocked ?: true
 
     val statusLine = when {
         status == null -> "Checking…"
@@ -405,9 +402,6 @@ private fun FriendCard(
     val initials = remember(peer.name) {
         peer.name.trim().split(" ").filter { it.isNotEmpty() }
             .take(2).joinToString("") { it.first().uppercase() }.ifEmpty { "?" }
-    }
-    val stepsText = remember(status?.stepCount) {
-        status?.stepCount?.let { java.text.NumberFormat.getIntegerInstance().format(it) } ?: "—"
     }
 
     Surface(
@@ -484,62 +478,10 @@ private fun FriendCard(
                 }
             }
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FriendStat("Steps", stepsText, Modifier.weight(1f))
-                FriendStat("Phone", if (status == null) "—" else if (isLocked) "Locked" else "Unlocked", Modifier.weight(1f))
-                LastUnlockStat(status = status, isLocked = isLocked, modifier = Modifier.weight(1f))
-            }
         }
     }
 }
 
-@Composable
-private fun FriendStat(label: String, value: String, modifier: Modifier = Modifier) {
-    val fp = friendsPalette()
-    Column(
-        modifier = modifier
-            .clip(RoundedCornerShape(12.dp))
-            .background(fp.boxBg)
-            .padding(10.dp)
-    ) {
-        Text(label, fontSize = 11.sp, fontWeight = FontWeight.SemiBold, color = fp.muted)
-        Text(value, fontSize = 15.sp, fontWeight = FontWeight.ExtraBold, color = fp.ink, maxLines = 1)
-    }
-}
-
-/**
- * "Last unlock" box. Owns its own 1-second ticker so only this text
- * recomposes each second (not the whole card), and the ticker runs only
- * while the phone is locked and a timestamp exists.
- */
-@Composable
-private fun LastUnlockStat(status: PeerLiveStatus?, isLocked: Boolean, modifier: Modifier = Modifier) {
-    val unlockedAt = status?.lastUnlockedAtMs ?: 0L
-    val needsTicker = status != null && isLocked && unlockedAt > 0L
-    var now by remember { mutableLongStateOf(System.currentTimeMillis()) }
-    if (needsTicker) {
-        LaunchedEffect(unlockedAt) {
-            while (true) {
-                now = System.currentTimeMillis()
-                delay(1_000)
-            }
-        }
-    }
-    val text = when {
-        status == null -> "—"
-        !isLocked -> "now"
-        unlockedAt <= 0L -> "—"
-        else -> friendElapsed(((now - unlockedAt) / 1000).coerceAtLeast(0))
-    }
-    FriendStat("Last unlock", text, modifier)
-}
-
-private fun friendElapsed(s: Long): String = when {
-    s < 60 -> "${s}s ago"
-    s < 3_600 -> "${s / 60}m ago"
-    s < 86_400 -> "${s / 3_600}h ago"
-    else -> "${s / 86_400}d ago"
-}
 
 //updated the timnestamp function
 private fun formatPeerTimeAgo(isoTimestamp: String): String {

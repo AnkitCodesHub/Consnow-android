@@ -4,7 +4,6 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
-import com.Consnow.core.common.Result
 import com.Consnow.core.network.api.ApiService
 import com.Consnow.features.steps.domain.usecase.GetPeerStepsUseCase
 import kotlinx.coroutines.Job
@@ -28,7 +27,7 @@ data class PeerLiveStatus(
 )
 
 /**
- * Loads steps + lock/online status for every connected friend so the Home
+ * Loads online status for every connected friend so the Home
  * screen can show them in its list. Uses the same endpoints and rules as
  * PeerStepsViewModel (offline => locked; unlock time only moves forward).
  * The peer screen itself is unchanged and keeps its own ViewModel.
@@ -63,12 +62,6 @@ class PeerStatusesViewModel(
     }
 
     private suspend fun refreshOne(peerId: String) {
-        // Steps
-        val steps = when (val r = getPeerStepsUseCase(peerId)) {
-            is Result.Success -> r.data.stepCount
-            else -> null
-        }
-
         // Lock + online status
         var isOnline = false
         var isLocked = true
@@ -91,7 +84,6 @@ class PeerStatusesViewModel(
         _statuses.update { current ->
             val old = current[peerId] ?: PeerLiveStatus()
             current + (peerId to old.copy(
-                stepCount = steps ?: old.stepCount,          // keep last known on error
                 isOnline = isOnline,
                 isLocked = isLocked,
                 lastUnlockedAtMs = maxOf(old.lastUnlockedAtMs, unlockedAtMs ?: 0L),
