@@ -13,6 +13,10 @@ import androidx.compose.ui.graphics.*
 import androidx.compose.ui.graphics.drawscope.*
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.compose.animation.animateColorAsState
+import kotlin.math.PI
+import kotlin.math.cos
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 
@@ -85,53 +89,136 @@ fun LockStatusWidget(
 }
 
 /**
- * Animated lock icon drawn on Canvas.
- * Shackle rotates open (-52°) when unlocked, returns to 0° when locked.
+ * Animated lock icon drawn on Canvas (same design and motion as the iOS app).
+ *
+ * Solid padlock: onSurface color when locked, primary (teal) when unlocked,
+ * keyhole cut out in the background color.
+ *
+ * Unlock: keyhole turns like a key → shackle pops up → shackle turns 180° around
+ *         its right leg (like a real padlock opening), with a soft ring pulse.
+ * Lock:   shackle turns back → drops into the body → body "thunks", key turns back.
+ * While unlocked, a soft halo gently breathes.
+ *
+ * Drawn on a 100 × 100 design grid scaled to the canvas size.
  */
 @Composable
 private fun AnimatedLockIcon(isLocked: Boolean, modifier: Modifier = Modifier) {
-    val transition = updateTransition(targetState = isLocked, label = "lock")
-    val shackleRotation by transition.animateFloat(
-        label = "shackle",
-        transitionSpec = { tween(400, easing = FastOutSlowInEasing) },
-    ) { locked -> if (locked) 0f else -52f }
+    val start = if (isLocked) 0f else 1f          // no animation on first appearance
+    val lift = remember { Animatable(start) }      // 0 = seated, 1 = popped up
+    val spin = remember { Animatable(start) }      // 0 = closed side, 1 = turned 180°
+    val keyTurn = remember { Animatable(start) }   // 0 = upright, 1 = turned like a key
+    val squash = remember { Animatable(0f) }       // 1 = body squashed ("thunk")
+    val ring = remember { Animatable(1f) }         // 0..1 pulse progress, 1 = invisible
+    var shownLocked by remember { mutableStateOf(isLocked) }
 
-    val color = MaterialTheme.colorScheme.onSurface
+    val tint by animateColorAsState(
+        targetValue = if (isLocked) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.primary,
+        animationSpec = tween(400),
+        label = "lockTint",
+    )
+    val hole = MaterialTheme.colorScheme.background
+
+    val breathing = rememberInfiniteTransition(label = "halo")
+    val breathe by breathing.animateFloat(
+        initialValue = 0.12f,
+        targetValue = 0.24f,
+        animationSpec = infiniteRepeatable(tween(1600, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+        label = "haloAlpha",
+    )
+
+    // A new state cancels a half-finished sequence; animations continue from where they are.
+    LaunchedEffect(isLocked) {
+        if (shownLocked == isLocked) return@LaunchedEffect
+        shownLocked = isLocked
+        squash.snapTo(0f)
+        launch {
+            ring.snapTo(0f)
+            ring.animateTo(1f, tween(900, easing = LinearOutSlowInEasing))
+        }
+        if (!isLocked) {
+            // 1. key turns  2. shackle pops up  3. shackle turns around its right leg
+            launch { keyTurn.animateTo(1f, tween(200, easing = FastOutSlowInEasing)) }
+            delay(100)
+            launch { lift.animateTo(1f, spring(dampingRatio = 0.6f, stiffness = 385f)) }
+            delay(160)
+            spin.animateTo(1f, spring(dampingRatio = 0.72f, stiffness = 110f))
+        } else {
+            // 1. shackle turns back  2. drops in  3. body "thunks", key turns back
+            launch { spin.animateTo(0f, spring(dampingRatio = 0.85f, stiffness = 195f)) }
+            delay(320)
+            launch { lift.animateTo(0f, spring(dampingRatio = 0.75f, stiffness = 440f)) }
+            delay(160)
+            launch { keyTurn.animateTo(0f, tween(200, easing = FastOutSlowInEasing)) }
+            squash.animateTo(1f, tween(110, easing = FastOutSlowInEasing))
+            squash.animateTo(0f, spring(dampingRatio = 0.55f, stiffness = 320f))
+        }
+    }
 
     Canvas(modifier = modifier) {
-        val sw = size.width * 0.09f
+        val u = size.width / 100f
 
-        // Lock body rectangle
-        drawRoundRect(
-            color = color,
-            topLeft = Offset(size.width * 0.12f, size.height * 0.43f),
-            size = Size(size.width * 0.76f, size.height * 0.51f),
-            cornerRadius = CornerRadius(size.width * 0.1f),
-            style = Stroke(width = sw, cap = StrokeCap.Round),
-        )
-
-        // Keyhole circle in center of body
+        // Soft halo behind the lock (breathes while unlocked)
         drawCircle(
-            color = color,
-            radius = size.width * 0.075f,
-            center = Offset(size.width / 2f, size.height * 0.67f),
+            color = tint.copy(alpha = if (isLocked) 0.07f else breathe),
+            radius = 50f * u,
+            center = Offset(50f * u, 60f * u),
         )
 
-        // Shackle arc — pivots from left anchor point when opening
+        // Ring pulse on every change
+        if (ring.value < 1f) {
+            drawCircle(
+                color = tint.copy(alpha = (1f - ring.value) * 0.7f),
+                radius = (40f + 22f * ring.value) * u,
+                center = Offset(50f * u, 60f * u),
+                style = Stroke(width = 1.5.dp.toPx()),
+            )
+        }
+
+        // Shackle: lifts, then turns around its right leg (a 3D Y-axis turn,
+        // drawn as a horizontal flip that passes through edge-on at 90°).
+        val turn = cos(spin.value * PI).toFloat()
         withTransform({
-            rotate(
-                degrees = shackleRotation,
-                pivot = Offset(size.width * 0.30f, size.height * 0.43f),
+            translate(top = -14f * u * lift.value)
+            scale(scaleX = turn, scaleY = 1f, pivot = Offset(69f * u, 56f * u))
+        }) {
+            val shackle = Path().apply {
+                moveTo(31f * u, 56f * u)
+                lineTo(31f * u, 34f * u)
+                arcTo(
+                    rect = Rect(31f * u, 15f * u, 69f * u, 53f * u),
+                    startAngleDegrees = 180f,
+                    sweepAngleDegrees = 180f,
+                    forceMoveTo = false,
+                )
+                lineTo(69f * u, 56f * u)
+            }
+            drawPath(shackle, color = tint, style = Stroke(width = 8.5f * u, cap = StrokeCap.Round))
+        }
+
+        // Solid body (squashes from the bottom on lock)
+        withTransform({
+            scale(
+                scaleX = 1f + 0.05f * squash.value,
+                scaleY = 1f - 0.12f * squash.value,
+                pivot = Offset(50f * u, 94f * u),
             )
         }) {
-            drawArc(
-                color = color,
-                startAngle = 180f,
-                sweepAngle = 180f,
-                useCenter = false,
-                topLeft = Offset(size.width * 0.21f, size.height * 0.06f),
-                size = Size(size.width * 0.58f, size.height * 0.39f),
-                style = Stroke(width = sw, cap = StrokeCap.Round),
+            drawRoundRect(
+                color = tint,
+                topLeft = Offset(18f * u, 50f * u),
+                size = Size(64f * u, 44f * u),
+                cornerRadius = CornerRadius(13f * u),
+            )
+        }
+
+        // Keyhole cut-out, turns like a key
+        rotate(degrees = -90f * keyTurn.value, pivot = Offset(50f * u, 72f * u)) {
+            drawCircle(color = hole, radius = 6f * u, center = Offset(50f * u, 68f * u))
+            drawRoundRect(
+                color = hole,
+                topLeft = Offset(47.7f * u, 70f * u),
+                size = Size(4.6f * u, 11f * u),
+                cornerRadius = CornerRadius(2.3f * u),
             )
         }
     }

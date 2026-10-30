@@ -40,6 +40,7 @@ import com.Consnow.features.connections.domain.model.ConnectionsState
 import com.Consnow.features.connections.domain.model.PeerInfo
 import com.Consnow.features.steps.domain.model.StepsState
 import com.Consnow.ui.components.LockStatusWidget
+import com.Consnow.ui.components.MovementStatus
 import com.Consnow.ui.components.StepCard
 //edited on 26/10/2026
 import androidx.compose.material3.AlertDialog
@@ -219,32 +220,12 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Activity status
-            Box(
-                modifier = Modifier.height(20.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Text(
-                    text = if (stepsState.isActive) {
-                        "Walking"
-                    } else {
-                        "Last moved ${
-                            stepsState.lastActiveAt?.let {
-                                formatTimeAgo(it)
-                            } ?: "Unknown"
-                        }"
-                    },
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = if (stepsState.isActive) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                )
-            }
+            // Activity status: big walker while moving, "last moved" chip when not
+            MovementStatus(
+                isWalking = stepsState.isActive,
+                lastActiveAt = stepsState.lastActiveAt,
+                walkerHeight = 56.dp,
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
 
