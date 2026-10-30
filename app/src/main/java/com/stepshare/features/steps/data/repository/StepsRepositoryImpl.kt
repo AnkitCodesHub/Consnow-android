@@ -1,6 +1,7 @@
 package com.Consnow.features.steps.data.repository
 
 import com.Consnow.core.common.Result
+import com.Consnow.core.common.toFriendlyMessage
 import com.Consnow.core.database.dao.StepRecordDao
 import com.Consnow.core.database.entity.StepRecordEntity
 import com.Consnow.core.database.entity.SyncStatus
@@ -128,7 +129,7 @@ class StepsRepositoryImpl(
                 Result.Error("Could not load steps")
             }
         } catch (e: Exception) {
-            Result.Error(e.message ?: "Network error")
+            Result.Error(e.toFriendlyMessage())
         }
     }
         override suspend fun getMySteps(date: String): MyStepsResult? {

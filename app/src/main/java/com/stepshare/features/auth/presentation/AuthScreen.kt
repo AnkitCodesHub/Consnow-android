@@ -1,5 +1,6 @@
 package com.Consnow.features.auth.presentation
 
+import com.Consnow.core.common.OFFLINE_MESSAGE
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
@@ -109,7 +110,9 @@ fun AuthScreen(viewModel: AuthViewModel) {
             Spacer(Modifier.height(12.dp))
             Text(
                 text = error,
-                color = MaterialTheme.colorScheme.error,
+                // Offline isn't the user's mistake: grey, not red
+                color = if (error == OFFLINE_MESSAGE) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodyMedium
             )
         }

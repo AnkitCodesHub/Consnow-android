@@ -5,6 +5,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.Consnow.core.network.api.ApiService
+import com.Consnow.features.steps.data.cache.PeerProfileCache
 import com.Consnow.features.steps.domain.usecase.GetPeerStepsUseCase
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -75,6 +76,8 @@ class PeerStatusesViewModel(
                     unlockedAtMs = body.unlockedAt?.let {
                         runCatching { Instant.parse(it).toEpochMilli() }.getOrNull()
                     }
+                    // Warm the friend profile cache so tapping this friend opens instantly
+                    PeerProfileCache.putActivity(peerId, isOnline, isLocked, unlockedAtMs)
                 }
             }
         } catch (e: Exception) {

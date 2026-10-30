@@ -16,6 +16,7 @@ data class PeerStepsState(
     val peerName: String = "",
     val stepCount: Int = 0,
     val error: String? = null,
+    val isOffline: Boolean = false, // last refresh failed for lack of internet; data on screen may be old
     val isActive: Boolean = false,
     val lastActiveAt: String? = null,
 )

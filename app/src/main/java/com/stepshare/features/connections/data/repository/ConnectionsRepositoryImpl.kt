@@ -3,6 +3,7 @@ package com.Consnow.features.connections.data.repository
 
 import android.content.Context
 import com.Consnow.core.common.Result
+import com.Consnow.core.common.toFriendlyMessage
 import com.Consnow.core.network.api.ApiService
 import com.Consnow.core.network.dto.CreateConnectionRequest
 import com.Consnow.features.connections.domain.ConnectionsRepository
@@ -48,7 +49,7 @@ class ConnectionsRepositoryImpl(
                 Result.Error(response.errorBody()?.string() ?: "Connection failed", response.code())
             }
         } catch (e: Exception) {
-            Result.Error(e.message ?: "Network error")
+            Result.Error(e.toFriendlyMessage())
         }
     }
 
@@ -81,7 +82,7 @@ class ConnectionsRepositoryImpl(
             // Offline — return cache so the list doesn't go blank
             val cached = loadFromCache()
             if (cached.isNotEmpty()) Result.Success(cached)
-            else Result.Error(e.message ?: "Network error")
+            else Result.Error(e.toFriendlyMessage())
         }
     }
 

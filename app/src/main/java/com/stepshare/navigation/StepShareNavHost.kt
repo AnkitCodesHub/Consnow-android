@@ -14,6 +14,11 @@ import com.Consnow.features.auth.presentation.AuthScreen
 import com.Consnow.features.auth.presentation.AuthViewModel
 import com.Consnow.features.connections.presentation.ConnectScreen
 import com.Consnow.features.connections.presentation.ConnectionsViewModel
+import com.Consnow.core.common.Result
+import com.Consnow.features.steps.data.cache.PeerProfileCache
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import com.Consnow.features.steps.presentation.*
 
 object Routes {
@@ -95,6 +100,27 @@ fun ConsnowNavHost() {
             val peerStatuses by peerStatusesViewModel.statuses.collectAsState()
             LaunchedEffect(connectionsState.connections) {
                 peerStatusesViewModel.track(connectionsState.connections.map { it.id })
+
+                // Prefetch each friend's steps once per Home visit so opening a profile
+                // shows real numbers immediately instead of a spinner
+                connectionsState.connections.forEach { PeerProfileCache.putName(it.id, it.name) }
+                coroutineScope {
+                    connectionsState.connections.map { peer ->
+                        async {
+                            val r = c.getPeerStepsUseCase(peer.id)
+                            if (r is Result.Success) {
+                                PeerProfileCache.putSteps(
+                                    peerId = peer.id,
+                                    name = r.data.userName,
+                                    stepCount = r.data.stepCount,
+                                    date = r.data.date,
+                                    isActive = r.data.isActive,
+                                    lastActiveAt = r.data.lastActiveAt,
+                                )
+                            }
+                        }
+                    }.awaitAll()
+                }
             }
 
             HomeScreen(
@@ -105,7 +131,10 @@ fun ConsnowNavHost() {
                     else stepsViewModel.onPermissionDenied()
                 },
                 onSync = { stepsViewModel.triggerSync() },
-                onPeerClick = { peer -> navController.navigate(Routes.peerSteps(peer.id)) },
+                onPeerClick = { peer ->
+                    PeerProfileCache.putName(peer.id, peer.name)
+                    navController.navigate(Routes.peerSteps(peer.id))
+                },
                 onConnectClick = { navController.navigate(Routes.CONNECT) },
                 onLogout = {
                     authViewModel.logout()
@@ -168,7 +197,7 @@ fun ConsnowNavHost() {
 
             PeerStepsScreen(
                 state = state,
-                onRefresh = { peerStepsViewModel.loadPeerSteps() },
+                onRefresh = { peerStepsViewModel.refresh() },
                 onBack = { navController.popBackStack() },
                 isLocked = peerIsLocked,
 //                isOnline = peerIsOnline,

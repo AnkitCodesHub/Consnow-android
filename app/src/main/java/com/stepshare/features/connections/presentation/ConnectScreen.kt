@@ -1,5 +1,6 @@
 package com.Consnow.features.connections.presentation
 
+import com.Consnow.core.common.OFFLINE_MESSAGE
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
@@ -77,7 +78,13 @@ fun ConnectScreen(
 
         state.error?.let {
             Spacer(Modifier.height(12.dp))
-            Text(text = it, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.bodyMedium)
+            Text(
+                text = it,
+                // Offline isn't the user's mistake: grey, not red
+                color = if (it == OFFLINE_MESSAGE) MaterialTheme.colorScheme.onSurfaceVariant
+                        else MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodyMedium
+            )
         }
 
         if (state.connectSuccess) {

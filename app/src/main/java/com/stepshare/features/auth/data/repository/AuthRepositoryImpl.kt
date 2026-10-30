@@ -1,6 +1,8 @@
 package com.Consnow.features.auth.data.repository
 
+import com.Consnow.features.steps.data.cache.PeerProfileCache
 import com.Consnow.core.common.Result
+import com.Consnow.core.common.toFriendlyMessage
 import com.Consnow.core.datastore.TokenManager
 import com.Consnow.core.network.api.ApiService
 import com.Consnow.core.network.dto.LoginRequest
@@ -40,7 +42,7 @@ class AuthRepositoryImpl(
                 Result.Error(response.errorBody()?.string() ?: "Registration failed", response.code())
             }
         } catch (e: Exception) {
-            Result.Error(e.message ?: "Network error")
+            Result.Error(e.toFriendlyMessage())
         }
     }
 
@@ -67,12 +69,13 @@ class AuthRepositoryImpl(
                 Result.Error(response.errorBody()?.string() ?: "Login failed", response.code())
             }
         } catch (e: Exception) {
-            Result.Error(e.message ?: "Network error")
+            Result.Error(e.toFriendlyMessage())
         }
     }
 
     override suspend fun logout() {
         tokenManager.clearSession()
+        PeerProfileCache.clear() // next account on this phone must not see old friends' data
         FirebaseAnalytics.getInstance(context).setUserId(null)
     }
 

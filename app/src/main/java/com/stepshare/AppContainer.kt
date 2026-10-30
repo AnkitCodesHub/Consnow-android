@@ -14,6 +14,7 @@ import com.Consnow.features.connections.data.repository.ConnectionsRepositoryImp
 import com.Consnow.features.connections.domain.ConnectionsRepository
 import com.Consnow.features.connections.domain.usecase.ConnectUseCase
 import com.Consnow.features.connections.domain.usecase.GetConnectionsUseCase
+import com.Consnow.features.steps.data.cache.PeerProfileCache
 import com.Consnow.features.steps.data.repository.StepsRepositoryImpl
 import com.Consnow.features.steps.domain.StepsRepository
 import com.Consnow.features.steps.domain.usecase.GetPeerStepsUseCase
@@ -41,6 +42,11 @@ class AppContainer(context: Context) {
     // ── Core ──────────────────────────────────────────────
 
     val tokenManager = TokenManager(context)
+
+    init {
+        // Load friends' last known profiles from disk so PeerStepsScreen opens instantly
+        PeerProfileCache.init(context)
+    }
 
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
