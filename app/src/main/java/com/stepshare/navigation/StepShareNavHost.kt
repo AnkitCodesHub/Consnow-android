@@ -123,6 +123,10 @@ fun ConsnowNavHost() {
                 }
             }
 
+            // Live internet state for the friendly offline note on Home
+            val isOnline by c.networkMonitor.isOnline
+                .collectAsState(initial = c.networkMonitor.isOnlineNow())
+
             HomeScreen(
                 stepsState = stepsState,
                 connectionsState = connectionsState,
@@ -154,6 +158,7 @@ fun ConsnowNavHost() {
                 ownIsLocked = ownIsLocked,
                 ownLastUnlockedAtMs = ownLastUnlockedAtMs,
                 peerStatuses = peerStatuses,
+                isOffline = !isOnline,
             )
         }
 

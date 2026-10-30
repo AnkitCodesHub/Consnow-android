@@ -69,6 +69,7 @@ fun HomeScreen(
     ownIsLocked: Boolean = true,
     ownLastUnlockedAtMs: Long = 0L,
     peerStatuses: Map<String, PeerLiveStatus> = emptyMap(),
+    isOffline: Boolean = false, // phone has no internet: show the friendly offline note
 ) {
     val context = LocalContext.current
 
@@ -132,6 +133,24 @@ fun HomeScreen(
         )
     ) {
         item {
+            // Friendly offline note — same pill style as the friend screen
+            if (isOffline) {
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                ) {
+                    Text(
+                        text = "You're offline · connect to the internet to see live updates",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(16.dp))
+            }
+
             // Today's step count
             Text(
                 text = "Today's Steps",
@@ -158,6 +177,11 @@ fun HomeScreen(
 
                 stepsState.syncStatus == SyncStatus.SYNCED ->
                     "Synced" to MaterialTheme.colorScheme.primary
+
+                // Steps are still counted offline; they upload once internet is back
+                isOffline ->
+                    "Saved on phone · will sync when online" to
+                            MaterialTheme.colorScheme.onSurfaceVariant
 
                 else ->
                     "Waiting to sync" to

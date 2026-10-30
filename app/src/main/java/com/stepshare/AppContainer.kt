@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.Consnow.core.database.ConsnowDatabase  // only this one
 import com.Consnow.core.datastore.TokenManager
+import com.Consnow.core.network.NetworkMonitor
 import com.Consnow.core.network.api.ApiService
 import com.Consnow.core.network.interceptor.AuthInterceptor
 import com.Consnow.features.auth.data.repository.AuthRepositoryImpl
@@ -42,6 +43,9 @@ class AppContainer(context: Context) {
     // ── Core ──────────────────────────────────────────────
 
     val tokenManager = TokenManager(context)
+
+    /** Live "do we have internet" signal for showing the offline note. */
+    val networkMonitor = NetworkMonitor(context)
 
     init {
         // Load friends' last known profiles from disk so PeerStepsScreen opens instantly
