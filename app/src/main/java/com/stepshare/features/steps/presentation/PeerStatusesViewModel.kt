@@ -4,6 +4,7 @@ import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.Consnow.core.common.ActivityEventBus
 import com.Consnow.core.network.api.ApiService
 import com.Consnow.features.steps.data.cache.PeerProfileCache
 import com.Consnow.features.steps.domain.usecase.GetPeerStepsUseCase
@@ -18,14 +19,26 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.LocalDate
+import java.util.concurrent.ConcurrentHashMap
 
 /** Live summary of one friend, shown on the Home screen friends list. */
 data class PeerLiveStatus(
     val stepCount: Int? = null,      // null until first loaded
     val isOnline: Boolean = false,
     val isLocked: Boolean = true,
+    val isActive: Boolean = false,   // true when peer is currently walking (steps increasing)
     val lastUnlockedAtMs: Long = 0L,
-)
+) {
+    /**
+     * True when the peer is actively doing something:
+     *   - phone is unlocked (using it), OR
+     *   - actively walking (steps increasing)
+     * AND the peer must be online (heartbeat fresh).
+     * Used for the green/red dot on the friends list.
+     */
+    val isUserActive: Boolean get() = isOnline && (!isLocked || isActive)
+}
 
 /**
  * Loads online status for every connected friend so the Home
@@ -43,6 +56,28 @@ class PeerStatusesViewModel(
 
     private var trackedIds: List<String> = emptyList()
     private var pollJob: Job? = null
+
+    // Walking pushes seen per friend. A poll that was in flight when a push arrived holds
+    // older data, so it must not overwrite the push (compared by count, not by clock).
+    private val pushCounts = ConcurrentHashMap<String, Long>()
+
+    init {
+        // Server pushes "friend started / stopped walking" -> dot and text update right away.
+        viewModelScope.launch {
+            ActivityEventBus.peerActivity.collect { event ->
+                pushCounts.merge(event.userId, 1L, Long::plus)
+                // Only friends already loaded: an unknown friend has no online/lock info yet,
+                // and a half-empty entry would wrongly show as offline.
+                if (_statuses.value.containsKey(event.userId)) {
+                    _statuses.update { current ->
+                        val old = current[event.userId] ?: return@update current
+                        current + (event.userId to old.copy(isActive = event.isActive))
+                    }
+                    PeerProfileCache.putWalking(event.userId, event.isActive, event.lastActiveAt)
+                }
+            }
+        }
+    }
 
     /** Call whenever the connections list changes. Restarts polling for the new ids. */
     fun track(peerIds: List<String>) {
@@ -66,6 +101,9 @@ class PeerStatusesViewModel(
         // Lock + online status
         var isOnline = false
         var isLocked = true
+        var isActive = false
+        var stepsFetched = false
+        val pushesAtStart = pushCounts[peerId] ?: 0L
         var unlockedAtMs: Long? = null
         try {
             val response = apiService.getPeerActivity(peerId)
@@ -84,11 +122,28 @@ class PeerStatusesViewModel(
             Log.w("PeerStatuses", "activity fetch failed for $peerId: ${e.message}")
         }
 
+        // Fetch step activity to know if peer is currently walking
+        try {
+            val today = LocalDate.now().toString()
+            val stepsResponse = apiService.getPeerSteps(peerId, today)
+            if (stepsResponse.isSuccessful) {
+                stepsResponse.body()?.let { body ->
+                    isActive = body.isActive
+                    stepsFetched = true
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("PeerStatuses", "steps fetch failed for $peerId: ${e.message}")
+        }
+
         _statuses.update { current ->
             val old = current[peerId] ?: PeerLiveStatus()
+            val pushedDuring = (pushCounts[peerId] ?: 0L) != pushesAtStart
             current + (peerId to old.copy(
                 isOnline = isOnline,
                 isLocked = isLocked,
+                // Keep the last known walking state if the steps request failed or a newer push landed
+                isActive = if (stepsFetched && !pushedDuring) isActive else old.isActive,
                 lastUnlockedAtMs = maxOf(old.lastUnlockedAtMs, unlockedAtMs ?: 0L),
             ))
         }

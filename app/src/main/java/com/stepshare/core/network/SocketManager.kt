@@ -9,6 +9,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 import java.time.Instant
 import com.Consnow.core.common.ActivityEventBus
+import com.Consnow.core.common.PeerActivityEvent
 import com.Consnow.core.common.PeerUnlockEvent
 import com.Consnow.core.common.PeerLockEvent
 
@@ -71,6 +72,20 @@ class SocketManager(
                     scope.launch { ActivityEventBus.emit(PeerLockEvent(userId, lockedAtMs)) }
                 } catch (e: Exception) {
                     Log.e(TAG, "peer_locked parse error: ${e.message}")
+                }
+            }
+
+            // Emitted by server when a peer starts or stops walking (state change only).
+            // Payload: { userId: string, isActive: boolean, lastActiveAt: ISO string | null }
+            socket?.on("peer_activity") { args ->
+                try {
+                    val data = args[0] as JSONObject
+                    val userId = data.getString("userId")
+                    val isActive = data.getBoolean("isActive")
+                    val lastActiveAt = data.optString("lastActiveAt").takeIf { it.isNotEmpty() && it != "null" }
+                    scope.launch { ActivityEventBus.emit(PeerActivityEvent(userId, isActive, lastActiveAt)) }
+                } catch (e: Exception) {
+                    Log.e(TAG, "peer_activity parse error: ${e.message}")
                 }
             }
 

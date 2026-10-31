@@ -9,6 +9,7 @@ import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.height
@@ -301,13 +302,17 @@ private fun LastMovedChip(lastMoved: LastMoved) {
         Recency.NOT_TODAY -> grey.copy(alpha = 0.85f)
     }
 
+    // Brighter text than the chip tint so it stays readable on a dark background.
+    val textColor = lerp(color, MaterialTheme.colorScheme.onSurface, 0.3f)
+
     // Large, high-contrast chip for low-vision readers. Sizes are in sp, so they
     // also grow with the phone's font-size setting; text wraps instead of being cut off.
     Row(
         modifier = Modifier
             .padding(horizontal = 16.dp)
             .heightIn(min = 72.dp)
-            .background(color.copy(alpha = 0.16f), RoundedCornerShape(36.dp))
+            .background(color.copy(alpha = 0.24f), RoundedCornerShape(36.dp))
+            .border(1.5.dp, color.copy(alpha = 0.55f), RoundedCornerShape(36.dp))
             .padding(start = 14.dp, end = 24.dp, top = 12.dp, bottom = 12.dp)
             .semantics(mergeDescendants = true) {},
         verticalAlignment = Alignment.CenterVertically,
@@ -321,19 +326,10 @@ private fun LastMovedChip(lastMoved: LastMoved) {
         Column {
             Text(
                 text = lastMoved.title,
-                color = color,
+                color = textColor,
                 fontSize = 21.sp,
                 lineHeight = 26.sp,
                 fontWeight = FontWeight.Bold,
-                maxLines = 2,
-            )
-            Spacer(Modifier.height(2.dp))
-            Text(
-                text = lastMoved.subtitle,
-                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.78f),
-                fontSize = 16.sp,
-                lineHeight = 20.sp,
-                fontWeight = FontWeight.SemiBold,
                 maxLines = 2,
             )
         }

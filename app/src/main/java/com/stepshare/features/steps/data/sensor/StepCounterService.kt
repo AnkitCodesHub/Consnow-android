@@ -71,10 +71,11 @@ class StepCounterService : Service(), SensorEventListener {
         private const val KEY_LAST_COUNT = "last_today_count"
         const val SYNC_INTERVAL_MS = 1_000L
         const val SYNC_DEBOUNCE_MS = 1_000L
-        // 60s of no steps = inactive
-        private const val ACTIVITY_TIMEOUT_MS = 60 * 1000L
-        // check activity status every 15s
-        private const val ACTIVITY_CHECK_INTERVAL_MS = 15_000L
+        // 15s of no steps = inactive (was 60s; reduced so friends see
+        // "stopped walking" within ~20s instead of ~2 minutes)
+        const val ACTIVITY_TIMEOUT_MS = 15_000L
+        // check activity status every 5s (was 15s; reduced for faster transition)
+        const val ACTIVITY_CHECK_INTERVAL_MS = 5_000L
 
         fun start(context: Context) {
             val intent = Intent(context, StepCounterService::class.java)

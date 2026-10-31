@@ -75,9 +75,22 @@ class StepsRepositoryImpl(
     // network comes back they fire together; serialize them so requests leave in order.
     private val syncMutex = Mutex()
 
+    // What the server was last told about "walking now". Lets us send the
+    // walking -> stopped change once, instead of a request on every 15s tick.
+    @Volatile private var serverThinksActive = false
+
     override suspend fun syncPendingToServer(isActive: Boolean): Result<Int> = syncMutex.withLock {
         val pending = stepRecordDao.getRecordsByStatus(SyncStatus.PENDING)
-        if (pending.isEmpty()) return@withLock Result.Success(0)
+
+        // When walking stops (isActive=false) but today's record is already SYNCED,
+        // we still need to tell the server so it clears the "Walking" status for peers.
+        // Re-sync today's record with isActive=false.
+        if (pending.isEmpty()) {
+            if (!isActive && serverThinksActive) {
+                sendActivityUpdate(isActive = false)
+            }
+            return@withLock Result.Success(0)
+        }
 
         val today = today()
         var synced = 0
@@ -100,6 +113,7 @@ class StepsRepositoryImpl(
             }
 
             if (response.isSuccessful) {
+                if (record.date == today) serverThinksActive = isActive
                 // Only clear PENDING if no newer steps were written during the request.
                 if (stepRecordDao.markSyncedIfUnchanged(record.id, record.stepCount, SyncStatus.SYNCED) > 0) {
                     synced++
@@ -109,6 +123,30 @@ class StepsRepositoryImpl(
             }
         }
         Result.Success(synced)
+    }
+
+    /**
+     * Sends a lightweight sync with just the isActive flag for today's record.
+     * Used when walking stops but there are no pending step changes to sync —
+     * without this, the server would keep showing "Walking" until the next
+     * step change triggers a real sync.
+     */
+    private suspend fun sendActivityUpdate(isActive: Boolean) {
+        try {
+            val today = today()
+            val record = stepRecordDao.getRecordByDate(today) ?: return
+            val response = apiService.syncSteps(
+                SyncStepsRequest(
+                    stepCount = record.stepCount,
+                    date = today,
+                    isActive = isActive,
+                    lastStepAt = record.lastUpdatedAt,
+                )
+            )
+            if (response.isSuccessful) serverThinksActive = isActive
+        } catch (_: Exception) {
+            // Best-effort: the periodic sync will catch it eventually
+        }
     }
 
     override suspend fun getPeerSteps(peerId: String): Result<PeerStepsResult> {
