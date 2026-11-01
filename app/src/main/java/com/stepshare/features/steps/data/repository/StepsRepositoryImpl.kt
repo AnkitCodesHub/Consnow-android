@@ -143,9 +143,11 @@ class StepsRepositoryImpl(
                     lastStepAt = record.lastUpdatedAt,
                 )
             )
+            android.util.Log.d("StepSync", "Walking-stopped update sent: HTTP ${response.code()}, isActive=$isActive")
             if (response.isSuccessful) serverThinksActive = isActive
-        } catch (_: Exception) {
+        } catch (e: Exception) {
             // Best-effort: the periodic sync will catch it eventually
+            android.util.Log.w("StepSync", "Walking-stopped update failed: ${e.message}")
         }
     }
 
