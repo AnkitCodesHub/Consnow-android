@@ -44,13 +44,6 @@ class PeerStepsViewModel(
     private val _isOnline = MutableStateFlow(cachedActivity?.isOnline ?: false)
     val isOnline: StateFlow<Boolean> = _isOnline.asStateFlow()
 
-    // True ONLY when the server explicitly says this friend is offline (no recent heartbeat).
-    // Unlike isOnline it is NOT true while unknown, and a failed request on MY side leaves it
-    // as it was - so "I have no internet" is never shown as "my friend is offline".
-    // Drives the offline symbol at the top of the screen. Lock behaviour does not use it.
-    private val _friendOffline = MutableStateFlow(cachedActivity?.let { !it.isOnline } ?: false)
-    val friendOffline: StateFlow<Boolean> = _friendOffline.asStateFlow()
-
     // Epoch millis of peer's last unlock — fed into LockStatusWidget timer.
     // Only ever moves forward via applyTimestamp() to prevent stale overwrites.
     private val _lastUnlockedAtMs = MutableStateFlow(cached?.lastUnlockedAtMs ?: 0L)
@@ -79,10 +72,6 @@ class PeerStepsViewModel(
     )
     val state = _state.asStateFlow()
 
-    // Counts walking pushes. A steps fetch that was already in flight when a push arrived
-    // holds older data, so it must not overwrite the push (compared by count, not by clock).
-    private val activityPushCount = java.util.concurrent.atomic.AtomicLong(0)
-
     // When cached data is on screen, a failed first fetch keeps it instead of showing an error
     private var isInitialLoad = _state.value.isLoading
     private var refreshStarted = false
@@ -91,7 +80,6 @@ class PeerStepsViewModel(
         loadPeerSteps()
         fetchPeerActivity()
         listenForWebSocketEvents()
-        listenForActivityPush()
         startActivityPolling()
     }
 
@@ -117,7 +105,6 @@ class PeerStepsViewModel(
                     if (BuildConfig.DEBUG) Log.d("PeerLock", "isLocked=${body.isLocked} unlockedAt=${body.unlockedAt}")
                     _isLocked.value = if (!body.isOnline) true else body.isLocked
                     _isOnline.value = body.isOnline
-                    _friendOffline.value = !body.isOnline
                     body.unlockedAt?.let { iso ->
                         applyTimestamp(Instant.parse(iso).toEpochMilli())
                     }
@@ -171,24 +158,6 @@ class PeerStepsViewModel(
     }
 
     /**
-     * Listens for the server's peer_activity push (friend started / stopped walking), so the
-     * Walking <-> "Last moved" switch happens right away instead of on the next 5s poll.
-     */
-    private fun listenForActivityPush() {
-        viewModelScope.launch {
-            ActivityEventBus.peerActivity
-                .filter { it.userId == peerId }
-                .collect { event ->
-                    activityPushCount.incrementAndGet()
-                    _state.update {
-                        it.copy(isActive = event.isActive, lastActiveAt = event.lastActiveAt ?: it.lastActiveAt)
-                    }
-                    PeerProfileCache.putWalking(peerId, event.isActive, event.lastActiveAt)
-                }
-        }
-    }
-
-    /**
      * Polls GET /activity/peer/:id every 15s as fallback when WebSocket is not connected.
      * Uses applyTimestamp() so a stale poll cannot overwrite a fresher WebSocket event.
      * On network failure, sets isLocked = true so widget shows locked instead of stale state.
@@ -203,7 +172,6 @@ class PeerStepsViewModel(
                         response.body()?.let { body ->
                             _isLocked.value = if (!body.isOnline) true else body.isLocked
                             _isOnline.value = body.isOnline
-                            _friendOffline.value = !body.isOnline
                             body.unlockedAt?.let { iso ->
                                 applyTimestamp(Instant.parse(iso).toEpochMilli())
                             }
@@ -241,29 +209,24 @@ class PeerStepsViewModel(
         if (isInitialLoad) {
             _state.update { it.copy(isLoading = true, error = null) }
         }
-        val pushesAtStart = activityPushCount.get()
         when (val result = getPeerStepsUseCase(peerId)) {
             is Result.Success -> {
                 isInitialLoad = false
-                // A push landed while this request was in flight: its walking state is newer.
-                val pushedDuring = activityPushCount.get() != pushesAtStart
-                val isActive = if (pushedDuring) _state.value.isActive else result.data.isActive
-                val lastActiveAt = if (pushedDuring) _state.value.lastActiveAt else result.data.lastActiveAt
                 PeerProfileCache.putSteps(
                     peerId = peerId,
                     name = result.data.userName,
                     stepCount = result.data.stepCount,
                     date = result.data.date,
-                    isActive = isActive,
-                    lastActiveAt = lastActiveAt,
+                    isActive = result.data.isActive,
+                    lastActiveAt = result.data.lastActiveAt,
                 )
                 _state.update {
                     it.copy(
                         isLoading = false,
                         peerName = result.data.userName,
                         stepCount = result.data.stepCount,
-                        isActive = isActive,
-                        lastActiveAt = lastActiveAt,
+                        isActive = result.data.isActive,
+                        lastActiveAt = result.data.lastActiveAt,
                         error = null,
                         isOffline = false,
                     )

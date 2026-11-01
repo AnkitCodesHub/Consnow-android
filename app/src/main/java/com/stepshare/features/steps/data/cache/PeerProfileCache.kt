@@ -74,10 +74,6 @@ object PeerProfileCache {
         )
     }
 
-    /** Save a walking start/stop that arrived by push. Keeps the old time if the push had none. */
-    fun putWalking(peerId: String, isActive: Boolean, lastActiveAt: String?) =
-        update(peerId) { it.copy(isActive = isActive, lastActiveAt = lastActiveAt ?: it.lastActiveAt) }
-
     /** Save lock/online status. The unlock time only ever moves forward. */
     fun putActivity(peerId: String, isOnline: Boolean, isLocked: Boolean, lastUnlockedAtMs: Long?) =
         update(peerId) {

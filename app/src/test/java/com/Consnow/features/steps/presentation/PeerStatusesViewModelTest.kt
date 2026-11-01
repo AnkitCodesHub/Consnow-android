@@ -1,7 +1,5 @@
 package com.Consnow.features.steps.presentation
 
-import com.Consnow.core.common.ActivityEventBus
-import com.Consnow.core.common.PeerActivityEvent
 import com.Consnow.core.network.api.ApiService
 import com.Consnow.core.network.dto.PeerActivityResponse
 import com.Consnow.core.network.dto.PeerStepsResponse
@@ -24,10 +22,6 @@ import retrofit2.Response
 import java.io.IOException
 import java.lang.reflect.Proxy
 import java.time.Instant
-import kotlin.coroutines.Continuation
-import kotlin.coroutines.intrinsics.COROUTINE_SUSPENDED
-import kotlin.coroutines.resume
-import kotlinx.coroutines.runBlocking
 
 /**
  * Tests for the Home screen friends list status (test plan U8–U13).
@@ -45,11 +39,6 @@ class PeerStatusesViewModelTest {
     /** What the fake server answers for getPeerSteps. */
     private var stepsAnswer: (String) -> Response<PeerStepsResponse> = { okSteps(it) }
     private var calls = 0
-    /** When true, getPeerSteps hangs (like a slow network) until [resumeHeldSteps] is called. */
-    private var holdSteps = false
-    private var heldSteps: Continuation<Any?>? = null
-    @Suppress("UNCHECKED_CAST")
-    private fun resumeHeldSteps(r: Response<PeerStepsResponse>) { heldSteps!!.resume(r); heldSteps = null }
 
     private inline fun <reified T> fake(noinline handler: (String, Array<out Any?>) -> Any?): T =
         Proxy.newProxyInstance(T::class.java.classLoader, arrayOf(T::class.java)) { proxy, method, args ->
@@ -69,11 +58,7 @@ class PeerStatusesViewModelTest {
                     answer(args[0] as String)
                 }
                 "getPeerSteps" -> {
-                    if (holdSteps) {
-                        @Suppress("UNCHECKED_CAST")
-                        heldSteps = args.last() as Continuation<Any?>
-                        COROUTINE_SUSPENDED
-                    } else stepsAnswer(args[0] as String)
+                    stepsAnswer(args[0] as String)
                 }
                 else -> throw AssertionError("Unexpected API call: $name")
             }
@@ -273,73 +258,6 @@ class PeerStatusesViewModelTest {
         val vm = newViewModel()
         vm.track(listOf("p1")); runPollNow()
         assertFalse("steps failure + locked = red dot", vm.statuses.value.getValue("p1").isUserActive)
-        vm.track(emptyList())
-    }
-
-    // -- peer_activity push (instant walking start/stop on the Home list) --
-
-    private fun push(id: String, active: Boolean, lastActiveAt: String? = "2026-11-01T10:00:00.000Z") {
-        runBlocking { ActivityEventBus.emit(PeerActivityEvent(id, active, lastActiveAt)) }
-        scheduler.runCurrent()
-    }
-
-    @Test fun `push walking start turns the dot green without waiting for a poll`() {
-        answer = { ok(it, online = true, locked = true) }
-        stepsAnswer = { okSteps(it, isActive = false) }
-        val vm = newViewModel()
-        vm.track(listOf("p1")); runPollNow()
-        assertFalse(vm.statuses.value.getValue("p1").isUserActive)
-
-        push("p1", active = true)
-        assertTrue("push must flip to walking immediately", vm.statuses.value.getValue("p1").isUserActive)
-        vm.track(emptyList())
-    }
-
-    @Test fun `push walking stop turns the dot red without waiting for a poll`() {
-        answer = { ok(it, online = true, locked = true) }
-        stepsAnswer = { okSteps(it, isActive = true) }
-        val vm = newViewModel()
-        vm.track(listOf("p1")); runPollNow()
-        assertTrue(vm.statuses.value.getValue("p1").isUserActive)
-
-        push("p1", active = false)
-        assertFalse(vm.statuses.value.getValue("p1").isUserActive)
-        vm.track(emptyList())
-    }
-
-    @Test fun `push for a friend that is not loaded yet is ignored`() {
-        val vm = newViewModel()
-        vm.track(listOf("p1")); runPollNow()
-        push("stranger", active = true)
-        assertFalse(vm.statuses.value.containsKey("stranger"))
-        vm.track(emptyList())
-    }
-
-    @Test fun `push only changes the friend it is about`() {
-        answer = { ok(it, online = true, locked = true) }
-        stepsAnswer = { okSteps(it, isActive = false) }
-        val vm = newViewModel()
-        vm.track(listOf("p1", "p2")); runPollNow()
-        push("p1", active = true)
-        assertTrue(vm.statuses.value.getValue("p1").isUserActive)
-        assertFalse(vm.statuses.value.getValue("p2").isUserActive)
-        vm.track(emptyList())
-    }
-
-    @Test fun `a slow poll that started before the push cannot undo it`() {
-        answer = { ok(it, online = true, locked = true) }
-        stepsAnswer = { okSteps(it, isActive = false) }
-        val vm = newViewModel()
-        vm.track(listOf("p1")); runPollNow()          // p1 known, not walking
-
-        holdSteps = true
-        waitOnePoll()                                  // next poll is now in flight, steps pending
-        push("p1", active = true)                      // friend starts walking -> push arrives
-        holdSteps = false
-        resumeHeldSteps(okSteps("p1", isActive = false)) // old response (read before they walked) lands late
-        scheduler.runCurrent()
-
-        assertTrue("stale poll response must not overwrite the newer push", vm.statuses.value.getValue("p1").isActive)
         vm.track(emptyList())
     }
 
