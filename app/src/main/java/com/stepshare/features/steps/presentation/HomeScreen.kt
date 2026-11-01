@@ -40,6 +40,7 @@ import com.Consnow.features.connections.domain.model.ConnectionsState
 import com.Consnow.features.connections.domain.model.PeerInfo
 import com.Consnow.features.steps.domain.model.StepsState
 import com.Consnow.ui.components.LockStatusWidget
+import com.Consnow.ui.components.MovementStatus
 import com.Consnow.ui.components.StepCard
 //edited on 26/10/2026
 import androidx.compose.material3.AlertDialog
@@ -119,7 +120,7 @@ fun HomeScreen(
     // Friends split into online / offline for the list below
     val fp = friendsPalette()
     val (onlinePeers, offlinePeers) = remember(connectionsState.connections, peerStatuses) {
-        connectionsState.connections.partition { peerStatuses[it.id]?.isOnline == true }
+        connectionsState.connections.partition { peerStatuses[it.id]?.isUserActive == true }
     }
 
     LazyColumn(
@@ -219,32 +220,12 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Activity status
-            Box(
-                modifier = Modifier.height(20.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Text(
-                    text = if (stepsState.isActive) {
-                        "Walking"
-                    } else {
-                        "Last moved ${
-                            stepsState.lastActiveAt?.let {
-                                formatTimeAgo(it)
-                            } ?: "Unknown"
-                        }"
-                    },
-                    style = MaterialTheme.typography.labelSmall.copy(
-                        fontSize = 15.sp,
-                        fontWeight = FontWeight.Bold
-                    ),
-                    color = if (stepsState.isActive) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    }
-                )
-            }
+            // Activity status: big walker while moving, "last moved" chip when not
+            MovementStatus(
+                isWalking = stepsState.isActive,
+                lastActiveAt = stepsState.lastActiveAt,
+                walkerHeight = 56.dp,
+            )
 
             Spacer(modifier = Modifier.height(12.dp))
 
@@ -304,10 +285,10 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Box(Modifier.size(8.dp).clip(CircleShape).background(fp.onlineDot))
-                            Text("${onlinePeers.size} online", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fp.body)
+                            Text("${onlinePeers.size} active", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fp.body)
                             Spacer(Modifier.width(6.dp))
                             Box(Modifier.size(8.dp).clip(CircleShape).background(fp.offlineDot))
-                            Text("${offlinePeers.size} offline", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fp.body)
+                            Text("${offlinePeers.size} inactive", fontSize = 14.sp, fontWeight = FontWeight.SemiBold, color = fp.body)
                         }
                     }
                 }
@@ -352,14 +333,14 @@ fun HomeScreen(
             }
         } else {
             if (onlinePeers.isNotEmpty()) {
-                item { FriendsSectionLabel("Online now") }
+                item { FriendsSectionLabel("Active now") }
                 items(items = onlinePeers, key = { peer -> peer.id }, contentType = { "friend" }) { peer ->
                     FriendCard(peer = peer, status = peerStatuses[peer.id], onClick = { onPeerClick(peer) })
                     Spacer(modifier = Modifier.height(10.dp))
                 }
             }
             if (offlinePeers.isNotEmpty()) {
-                item { FriendsSectionLabel("Offline") }
+                item { FriendsSectionLabel("Inactive") }
                 items(items = offlinePeers, key = { peer -> peer.id }, contentType = { "friend" }) { peer ->
                     FriendCard(peer = peer, status = peerStatuses[peer.id], onClick = { onPeerClick(peer) })
                     Spacer(modifier = Modifier.height(10.dp))
@@ -460,12 +441,14 @@ private fun FriendCard(
     onClick: () -> Unit
 ) {
     val fp = friendsPalette()
-    val isOnline = status?.isOnline == true
+    val isOnline = status?.isUserActive == true
 
     val statusLine = when {
         status == null -> "Checking…"
-        isOnline -> "Online · now"
-        else -> "Offline"
+        isOnline && status.isActive && !status.isLocked -> "Walking · phone in use"
+        isOnline && status.isActive -> "Walking"
+        isOnline && !status.isLocked -> "Phone in use"
+        else -> "Inactive"
     }
     val initials = remember(peer.name) {
         peer.name.trim().split(" ").filter { it.isNotEmpty() }
@@ -524,7 +507,7 @@ private fun FriendCard(
                                     }
                                 )
                                 .border(3.dp, fp.card, CircleShape)
-                                .semantics { contentDescription = if (isOnline) "Online" else "Offline" }
+                                .semantics { contentDescription = if (isOnline) "Active" else "Inactive" }
                         )
                     }
                 }

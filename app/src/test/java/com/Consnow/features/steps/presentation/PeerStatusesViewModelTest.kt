@@ -2,6 +2,7 @@ package com.Consnow.features.steps.presentation
 
 import com.Consnow.core.network.api.ApiService
 import com.Consnow.core.network.dto.PeerActivityResponse
+import com.Consnow.core.network.dto.PeerStepsResponse
 import com.Consnow.features.steps.domain.StepsRepository
 import com.Consnow.features.steps.domain.usecase.GetPeerStepsUseCase
 import kotlinx.coroutines.Dispatchers
@@ -35,6 +36,8 @@ class PeerStatusesViewModelTest {
 
     /** What the fake server answers for getPeerActivity. Change it between polls. */
     private var answer: (String) -> Response<PeerActivityResponse> = { ok(it, online = true, locked = false) }
+    /** What the fake server answers for getPeerSteps. */
+    private var stepsAnswer: (String) -> Response<PeerStepsResponse> = { okSteps(it) }
     private var calls = 0
 
     private inline fun <reified T> fake(noinline handler: (String, Array<out Any?>) -> Any?): T =
@@ -49,9 +52,16 @@ class PeerStatusesViewModelTest {
 
     private fun newViewModel(): PeerStatusesViewModel {
         val api = fake<ApiService> { name, args ->
-            if (name != "getPeerActivity") throw AssertionError("Unexpected API call: $name")
-            calls++
-            answer(args[0] as String) // args[1] is the coroutine Continuation
+            when (name) {
+                "getPeerActivity" -> {
+                    calls++
+                    answer(args[0] as String)
+                }
+                "getPeerSteps" -> {
+                    stepsAnswer(args[0] as String)
+                }
+                else -> throw AssertionError("Unexpected API call: $name")
+            }
         }
         val repo = fake<StepsRepository> { name, _ -> throw AssertionError("Unexpected repo call: $name") }
         return PeerStatusesViewModel(GetPeerStepsUseCase(repo), api)
@@ -59,6 +69,9 @@ class PeerStatusesViewModelTest {
 
     private fun ok(id: String, online: Boolean, locked: Boolean, unlockedAt: String? = null) =
         Response.success(PeerActivityResponse(userId = id, unlockedAt = unlockedAt, isLocked = locked, isOnline = online))
+
+    private fun okSteps(id: String, isActive: Boolean = false, stepCount: Int = 0) =
+        Response.success(PeerStepsResponse(userId = id, userName = "Test", date = java.time.LocalDate.now().toString(), stepCount = stepCount, updatedAt = null, isActive = isActive))
 
     private fun runPollNow() = scheduler.runCurrent()
     private fun waitOnePoll() { scheduler.advanceTimeBy(20_000); scheduler.runCurrent() }
@@ -145,6 +158,119 @@ class PeerStatusesViewModelTest {
         assertTrue(vm.statuses.value.containsKey("p2"))
         waitOnePoll()
         assertEquals("p1 once, then p2 twice; old loop is gone", 3, calls)
+        vm.track(emptyList())
+    }
+
+    // ── isUserActive (green/red dot) tests ──────────────────────────────
+
+    @Test fun `green dot when online and unlocked and not walking`() {
+        answer = { ok(it, online = true, locked = false) }
+        stepsAnswer = { okSteps(it, isActive = false) }
+        val vm = newViewModel()
+        vm.track(listOf("p1")); runPollNow()
+        val s = vm.statuses.value.getValue("p1")
+        assertTrue("unlocked phone = active user", s.isUserActive)
+        vm.track(emptyList())
+    }
+
+    @Test fun `green dot when online and locked but walking`() {
+        answer = { ok(it, online = true, locked = true) }
+        stepsAnswer = { okSteps(it, isActive = true) }
+        val vm = newViewModel()
+        vm.track(listOf("p1")); runPollNow()
+        val s = vm.statuses.value.getValue("p1")
+        assertTrue("walking while locked = active user", s.isUserActive)
+        vm.track(emptyList())
+    }
+
+    @Test fun `red dot when online and locked and not walking`() {
+        answer = { ok(it, online = true, locked = true) }
+        stepsAnswer = { okSteps(it, isActive = false) }
+        val vm = newViewModel()
+        vm.track(listOf("p1")); runPollNow()
+        val s = vm.statuses.value.getValue("p1")
+        assertFalse("locked and not walking = inactive", s.isUserActive)
+        vm.track(emptyList())
+    }
+
+    @Test fun `red dot when offline regardless of lock or walking`() {
+        answer = { ok(it, online = false, locked = false) }
+        stepsAnswer = { okSteps(it, isActive = true) }
+        val vm = newViewModel()
+        vm.track(listOf("p1")); runPollNow()
+        val s = vm.statuses.value.getValue("p1")
+        assertFalse("offline = always inactive", s.isUserActive)
+        vm.track(emptyList())
+    }
+
+    @Test fun `green dot when online and unlocked and walking`() {
+        answer = { ok(it, online = true, locked = false) }
+        stepsAnswer = { okSteps(it, isActive = true) }
+        val vm = newViewModel()
+        vm.track(listOf("p1")); runPollNow()
+        val s = vm.statuses.value.getValue("p1")
+        assertTrue("unlocked + walking = active", s.isUserActive)
+        vm.track(emptyList())
+    }
+
+    // -- Walking status transition tests (HomeScreen green dot) --
+
+    @Test fun `green dot when locked but walking`() {
+        answer = { ok(it, online = true, locked = true) }
+        stepsAnswer = { okSteps(it, isActive = true) }
+        val vm = newViewModel()
+        vm.track(listOf("p1")); runPollNow()
+        assertTrue("locked+walking = green dot", vm.statuses.value.getValue("p1").isUserActive)
+        vm.track(emptyList())
+    }
+
+    @Test fun `red dot when walking stops and phone is locked`() {
+        // First poll: walking
+        answer = { ok(it, online = true, locked = true) }
+        stepsAnswer = { okSteps(it, isActive = true) }
+        val vm = newViewModel()
+        vm.track(listOf("p1")); runPollNow()
+        assertTrue("initially walking", vm.statuses.value.getValue("p1").isUserActive)
+
+        // Next poll: stopped walking
+        stepsAnswer = { okSteps(it, isActive = false) }
+        waitOnePoll()
+        assertFalse("stopped walking + locked = red dot", vm.statuses.value.getValue("p1").isUserActive)
+        vm.track(emptyList())
+    }
+
+    @Test fun `green dot stays when walking stops but phone is unlocked`() {
+        answer = { ok(it, online = true, locked = false) }
+        stepsAnswer = { okSteps(it, isActive = true) }
+        val vm = newViewModel()
+        vm.track(listOf("p1")); runPollNow()
+
+        // Stop walking but phone still unlocked
+        stepsAnswer = { okSteps(it, isActive = false) }
+        waitOnePoll()
+        assertTrue("stopped walking but unlocked = still green", vm.statuses.value.getValue("p1").isUserActive)
+        vm.track(emptyList())
+    }
+
+    @Test fun `steps fetch failure does not crash - defaults to not active`() {
+        answer = { ok(it, online = true, locked = true) }
+        stepsAnswer = { throw IOException("timeout") }
+        val vm = newViewModel()
+        vm.track(listOf("p1")); runPollNow()
+        assertFalse("steps failure + locked = red dot", vm.statuses.value.getValue("p1").isUserActive)
+        vm.track(emptyList())
+    }
+
+    @Test fun `steps fetch failure keeps the last known walking state instead of flipping red`() {
+        answer = { ok(it, online = true, locked = true) }
+        stepsAnswer = { okSteps(it, isActive = true) }
+        val vm = newViewModel()
+        vm.track(listOf("p1")); runPollNow()
+        assertTrue(vm.statuses.value.getValue("p1").isActive)
+
+        stepsAnswer = { throw IOException("blip") }
+        waitOnePoll()
+        assertTrue("one failed request must not flip a walking friend to red", vm.statuses.value.getValue("p1").isActive)
         vm.track(emptyList())
     }
 }

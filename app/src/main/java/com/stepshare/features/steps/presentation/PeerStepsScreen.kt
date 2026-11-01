@@ -36,6 +36,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.Consnow.features.steps.domain.model.PeerStepsState
 import com.Consnow.ui.components.LockStatusWidget
+import com.Consnow.ui.components.MovementStatus
 import com.Consnow.ui.components.StepCard
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -138,27 +139,10 @@ fun PeerStepsScreen(
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // Activity status
-                        Text(
-                            text = if (state.isActive) {
-                                "Walking"
-                            } else {
-                                "Last moved ${
-                                    state.lastActiveAt?.let {
-                                        formatTimeAgo(it)
-                                    } ?: "Unknown"
-                                }"
-                            },
-                            style = MaterialTheme.typography.titleMedium.copy(
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 20.sp,
-                                letterSpacing = 0.5.sp
-                            ),
-                            color = if (state.isActive) {
-                                MaterialTheme.colorScheme.primary
-                            } else {
-                                MaterialTheme.colorScheme.onSurface
-                            }
+                        // Activity status: big walker while moving, "last moved" chip when not
+                        MovementStatus(
+                            isWalking = state.isActive,
+                            lastActiveAt = state.lastActiveAt,
                         )
 
                         // Offline note (the old "Tap to refresh" button is replaced by pull-to-refresh)

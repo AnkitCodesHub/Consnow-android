@@ -21,6 +21,9 @@ interface StepRecordDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun upsert(record: StepRecordEntity): Long
 
+    @Query("SELECT * FROM step_records WHERE date = :date LIMIT 1")
+    suspend fun getRecordByDate(date: String): StepRecordEntity?
+
     // Oldest day first, so a backlog from a long offline period is replayed in order.
     @Query("SELECT * FROM step_records WHERE sync_status = :status ORDER BY date ASC")
     suspend fun getRecordsByStatus(status: SyncStatus): List<StepRecordEntity>

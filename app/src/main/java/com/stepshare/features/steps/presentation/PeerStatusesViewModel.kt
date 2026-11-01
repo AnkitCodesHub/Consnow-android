@@ -18,14 +18,25 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import java.time.Instant
+import java.time.LocalDate
 
 /** Live summary of one friend, shown on the Home screen friends list. */
 data class PeerLiveStatus(
     val stepCount: Int? = null,      // null until first loaded
     val isOnline: Boolean = false,
     val isLocked: Boolean = true,
+    val isActive: Boolean = false,   // true when peer is currently walking (steps increasing)
     val lastUnlockedAtMs: Long = 0L,
-)
+) {
+    /**
+     * True when the peer is actively doing something:
+     *   - phone is unlocked (using it), OR
+     *   - actively walking (steps increasing)
+     * AND the peer must be online (heartbeat fresh).
+     * Used for the green/red dot on the friends list.
+     */
+    val isUserActive: Boolean get() = isOnline && (!isLocked || isActive)
+}
 
 /**
  * Loads online status for every connected friend so the Home
@@ -66,6 +77,8 @@ class PeerStatusesViewModel(
         // Lock + online status
         var isOnline = false
         var isLocked = true
+        var isActive = false
+        var stepsFetched = false
         var unlockedAtMs: Long? = null
         try {
             val response = apiService.getPeerActivity(peerId)
@@ -84,11 +97,27 @@ class PeerStatusesViewModel(
             Log.w("PeerStatuses", "activity fetch failed for $peerId: ${e.message}")
         }
 
+        // Fetch step activity to know if peer is currently walking
+        try {
+            val today = LocalDate.now().toString()
+            val stepsResponse = apiService.getPeerSteps(peerId, today)
+            if (stepsResponse.isSuccessful) {
+                stepsResponse.body()?.let { body ->
+                    isActive = body.isActive
+                    stepsFetched = true
+                }
+            }
+        } catch (e: Exception) {
+            Log.w("PeerStatuses", "steps fetch failed for $peerId: ${e.message}")
+        }
+
         _statuses.update { current ->
             val old = current[peerId] ?: PeerLiveStatus()
             current + (peerId to old.copy(
                 isOnline = isOnline,
                 isLocked = isLocked,
+                // Keep the last known walking state if the steps request failed
+                isActive = if (stepsFetched) isActive else old.isActive,
                 lastUnlockedAtMs = maxOf(old.lastUnlockedAtMs, unlockedAtMs ?: 0L),
             ))
         }
