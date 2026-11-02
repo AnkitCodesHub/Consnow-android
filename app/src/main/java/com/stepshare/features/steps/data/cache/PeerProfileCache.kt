@@ -21,7 +21,7 @@ data class CachedPeerProfile(
     /** Steps for today, or 0 if the cached count is from an earlier day (midnight reset). */
     fun todaySteps(): Int? = when {
         stepCount == null -> null
-        stepDate == LocalDate.now().toString() -> stepCount
+        stepDate == com.Consnow.core.common.TrustedClock.today() -> stepCount
         else -> 0
     }
 }

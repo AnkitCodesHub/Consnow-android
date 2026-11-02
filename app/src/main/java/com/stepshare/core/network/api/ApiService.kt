@@ -61,18 +61,9 @@ interface ApiService {
     @DELETE("auth/me") //edited on 26/10/2026
     suspend fun deleteAccount(): Response<Unit>
 
-    @PUT("activity/unlock")
-    suspend fun reportUnlock(@Body body: ActivityEventRequest): Response<UnlockResponse>
-
-    @PUT("activity/lock")
-    suspend fun reportLock(@Body body: ActivityEventRequest): Response<LockResponse>
-
     @GET("activity/me")
     suspend fun getMyActivity(): Response<OwnActivityResponse>
 
     @GET("activity/peer/{userId}")
     suspend fun getPeerActivity(@Path("userId") userId: String): Response<PeerActivityResponse>
-
-    data class UnlockResponse(val success: Boolean, val unlockedAt: String)
-    data class PeerUnlockResponse(val userId: Int, val unlockedAt: String?)
 }

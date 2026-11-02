@@ -18,6 +18,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.Consnow.ConsnowApp
 import com.Consnow.core.common.ActivityEventBus
+import com.Consnow.core.common.TrustedClock
 import com.Consnow.core.database.entity.SyncStatus
 import com.Consnow.core.datastore.TokenManager
 import com.Consnow.features.steps.data.SyncWorker
@@ -109,7 +110,7 @@ class StepsViewModel(
             while (true) {
                 try {
                     val app = application as ConsnowApp
-                    val today = java.time.LocalDate.now().toString()
+                    val today = TrustedClock.today()
                     val response = app.appContainer.stepsRepository.getMySteps(today)
                     if (response != null) {
                         val lastActiveAt = response.lastActiveAt
@@ -171,6 +172,7 @@ class StepsViewModel(
     // ── permission + service control (existing) ───────────────────────────────
     fun onPermissionGranted() {
         _state.update { it.copy(permissionGranted = true) }
+        // Runs on every Home open. The login merge happens inside the service, only after a login.
         StepCounterService.start(application)
         SyncWorker.enqueuePeriodicSync(application)
     }

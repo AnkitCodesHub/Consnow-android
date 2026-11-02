@@ -99,7 +99,7 @@ class PeerStatusesViewModel(
 
         // Fetch step activity to know if peer is currently walking
         try {
-            val today = LocalDate.now().toString()
+            val today = com.Consnow.core.common.TrustedClock.today()
             val stepsResponse = apiService.getPeerSteps(peerId, today)
             if (stepsResponse.isSuccessful) {
                 stepsResponse.body()?.let { body ->

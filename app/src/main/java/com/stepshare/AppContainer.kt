@@ -6,7 +6,10 @@ import com.Consnow.core.database.ConsnowDatabase  // only this one
 import com.Consnow.core.datastore.TokenManager
 import com.Consnow.core.network.NetworkMonitor
 import com.Consnow.core.network.api.ApiService
+import com.Consnow.core.common.TrustedClock
 import com.Consnow.core.network.interceptor.AuthInterceptor
+import com.Consnow.core.network.interceptor.ServerTimeInterceptor
+import com.Consnow.features.steps.data.sensor.StepCounterService
 import com.Consnow.features.auth.data.repository.AuthRepositoryImpl
 import com.Consnow.features.auth.domain.AuthRepository
 import com.Consnow.features.auth.domain.usecase.LoginUseCase
@@ -50,10 +53,13 @@ class AppContainer(context: Context) {
     init {
         // Load friends' last known profiles from disk so PeerStepsScreen opens instantly
         PeerProfileCache.init(context)
+        // Server-corrected clock, so a hand-changed phone date can't create future-dated steps
+        TrustedClock.init(context)
     }
 
     private val okHttpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
+            .addInterceptor(ServerTimeInterceptor())
             .addInterceptor(AuthInterceptor(tokenManager))
             .addInterceptor(HttpLoggingInterceptor().apply {
                 // Release builds log nothing: logcat is readable over USB and would expose
@@ -95,7 +101,9 @@ class AppContainer(context: Context) {
     val stepsRepository: StepsRepository by lazy {
         StepsRepositoryImpl(
             stepRecordDao = database.stepRecordDao(),
-            apiService = apiService
+            apiService = apiService,
+            currentUserId = { tokenManager.getUserId() },
+            canSync = { !StepCounterService.isServerMergePending(context) },
         )
     }
 

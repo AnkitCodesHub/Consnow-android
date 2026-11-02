@@ -1,6 +1,7 @@
 package com.Consnow.features.steps.data.repository
 
 import com.Consnow.core.common.Result
+import com.Consnow.core.common.TrustedClock
 import com.Consnow.core.common.toFriendlyMessage
 import com.Consnow.core.database.dao.StepRecordDao
 import com.Consnow.core.database.entity.StepRecordEntity
@@ -23,7 +24,11 @@ import com.Consnow.features.steps.domain.MyStepsResult
 
 class StepsRepositoryImpl(
     private val stepRecordDao: StepRecordDao,
-    private val apiService: ApiService
+    private val apiService: ApiService,
+    // Account currently logged in: only its rows are ever sent with its token
+    private val currentUserId: suspend () -> String?,
+    // False while the login merge is running (StepCounterService.isServerMergePending)
+    private val canSync: () -> Boolean = { true },
 ) : StepsRepository {
 
     private val dateFormatter = DateTimeFormatter.ISO_LOCAL_DATE
@@ -45,30 +50,19 @@ class StepsRepositoryImpl(
         }
     }.distinctUntilChanged()
 
-    override suspend fun updateLocalSteps(userId: String, stepCount: Int) {
-        val date = today()
-        val existing = stepRecordDao.getRecord(userId, date)
-
-        if (existing != null) {
-            if (stepCount > existing.stepCount) {
-                stepRecordDao.updateStepCount(
-                    userId = userId,
-                    date = date,
-                    count = stepCount,
-                    timestamp = System.currentTimeMillis(),
-                    status = SyncStatus.PENDING
-                )
-            }
-        } else {
-            stepRecordDao.upsert(
-                StepRecordEntity(
-                    userId = userId,
-                    stepCount = stepCount,
-                    date = date,
-                    syncStatus = SyncStatus.PENDING
-                )
+    // Raise-only and atomic, so sensor writes and the login merge can't undo each other
+    override suspend fun updateLocalSteps(userId: String, stepCount: Int, date: String, stepAtMs: Long) {
+        if (date > today()) return // never store a day that hasn't happened yet
+        stepRecordDao.insertIfAbsent(
+            StepRecordEntity(
+                userId = userId,
+                stepCount = stepCount,
+                date = date,
+                lastUpdatedAt = stepAtMs,
+                syncStatus = SyncStatus.PENDING,
             )
-        }
+        )
+        stepRecordDao.raiseStepCount(userId, date, stepCount, stepAtMs, SyncStatus.PENDING)
     }
 
     // The 15s loop, the debounced step sync and SyncWorker all call this. When the
@@ -80,19 +74,24 @@ class StepsRepositoryImpl(
     @Volatile private var serverThinksActive = false
 
     override suspend fun syncPendingToServer(isActive: Boolean): Result<Int> = syncMutex.withLock {
-        val pending = stepRecordDao.getRecordsByStatus(SyncStatus.PENDING)
+        // Wait for the login merge, or the server could take in steps it's about to be added to
+        if (!canSync()) return@withLock Result.Success(0)
+        val userId = currentUserId() ?: return@withLock Result.Success(0)
+        val today = today()
+        // Only this account's rows (another account may have used this phone), never a future day
+        val pending = stepRecordDao.getRecordsByStatusForUser(userId, SyncStatus.PENDING)
+            .filter { it.date <= today }
 
         // When walking stops (isActive=false) but today's record is already SYNCED,
         // we still need to tell the server so it clears the "Walking" status for peers.
         // Re-sync today's record with isActive=false.
         if (pending.isEmpty()) {
             if (!isActive && serverThinksActive) {
-                sendActivityUpdate(isActive = false)
+                sendActivityUpdate(userId, isActive = false)
             }
             return@withLock Result.Success(0)
         }
 
-        val today = today()
         var synced = 0
         for (record in pending) {
             val response = try {
@@ -131,10 +130,10 @@ class StepsRepositoryImpl(
      * without this, the server would keep showing "Walking" until the next
      * step change triggers a real sync.
      */
-    private suspend fun sendActivityUpdate(isActive: Boolean) {
+    private suspend fun sendActivityUpdate(userId: String, isActive: Boolean) {
         try {
             val today = today()
-            val record = stepRecordDao.getRecordByDate(today) ?: return
+            val record = stepRecordDao.getRecord(userId, today) ?: return
             val response = apiService.syncSteps(
                 SyncStepsRequest(
                     stepCount = record.stepCount,
@@ -187,7 +186,33 @@ class StepsRepositoryImpl(
             } catch (_: Exception) { null }
         }
 
-    private fun today(): String = LocalDate.now().format(dateFormatter)
+    override suspend fun fetchServerStepCount(date: String): Int? = try {
+        val response = apiService.getMySteps(date)
+        val body = response.body()
+        if (response.isSuccessful && body != null && body.date == date) body.stepCount else null
+    } catch (e: CancellationException) {
+        throw e
+    } catch (_: Exception) {
+        null
+    }
+
+    override suspend fun mergeLocalSteps(userId: String, date: String, stepCount: Int, needsSync: Boolean, stepAtMs: Long) {
+        if (date > today()) return
+        val status = if (needsSync) SyncStatus.PENDING else SyncStatus.SYNCED
+        stepRecordDao.insertIfAbsent(
+            StepRecordEntity(userId = userId, stepCount = stepCount, date = date, lastUpdatedAt = stepAtMs, syncStatus = status)
+        )
+        // Keeps the row's time of the last real step, so "last moved" doesn't jump to now
+        stepRecordDao.raiseStepCountKeepTime(userId, date, stepCount, status)
+    }
+
+    override suspend fun deleteFutureRecords(today: String) {
+        val removed = stepRecordDao.deleteRecordsAfter(today)
+        if (removed > 0) android.util.Log.w("StepSync", "Deleted $removed future-dated step rows")
+    }
+
+    // Server-corrected date, so a phone clock set ahead can't create rows for future days
+    private fun today(): String = TrustedClock.today()
 }
 
 data class PeerStepsResult(

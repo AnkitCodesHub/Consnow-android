@@ -41,4 +41,21 @@ interface StepRecordDao {
 
     @Query("UPDATE step_records SET step_count = :count, last_updated_at = :timestamp, sync_status = :status WHERE user_id = :userId AND date = :date")
     suspend fun updateStepCount(userId: String, date: String, count: Int, timestamp: Long, status: SyncStatus)
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun insertIfAbsent(record: StepRecordEntity): Long
+
+    /** Raises the count; never lowers it. One statement, so concurrent writers can't undo each other. */
+    @Query("UPDATE step_records SET step_count = :count, last_updated_at = :timestamp, sync_status = :status WHERE user_id = :userId AND date = :date AND step_count < :count")
+    suspend fun raiseStepCount(userId: String, date: String, count: Int, timestamp: Long, status: SyncStatus): Int
+
+    /** Same, but keeps last_updated_at (the time of the last real step). */
+    @Query("UPDATE step_records SET step_count = :count, sync_status = :status WHERE user_id = :userId AND date = :date AND step_count < :count")
+    suspend fun raiseStepCountKeepTime(userId: String, date: String, count: Int, status: SyncStatus): Int
+
+    @Query("SELECT * FROM step_records WHERE user_id = :userId AND sync_status = :status ORDER BY date ASC")
+    suspend fun getRecordsByStatusForUser(userId: String, status: SyncStatus): List<StepRecordEntity>
+
+    @Query("DELETE FROM step_records WHERE date > :date")
+    suspend fun deleteRecordsAfter(date: String): Int
 }
