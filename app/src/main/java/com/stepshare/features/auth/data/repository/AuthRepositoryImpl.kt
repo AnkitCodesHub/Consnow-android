@@ -8,6 +8,7 @@ import com.Consnow.core.network.api.ApiService
 import com.Consnow.core.network.dto.LoginRequest
 import com.Consnow.core.network.dto.RegisterRequest
 import com.Consnow.features.auth.domain.AuthRepository
+import com.Consnow.features.steps.data.sensor.StepCounterService
 import android.content.Context
 import com.google.firebase.analytics.FirebaseAnalytics
 import kotlinx.coroutines.CancellationException
@@ -26,6 +27,8 @@ class AuthRepositoryImpl(
             val response = apiService.register(RegisterRequest(name, email, password))
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
+                // Before saving the session: the step service merges today's server count once
+                StepCounterService.markServerMergePending(context)
                 tokenManager.saveSession(
                     token = body.token,
                     userId = body.user.id,
@@ -51,6 +54,8 @@ class AuthRepositoryImpl(
             val response = apiService.login(LoginRequest(email, password))
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
+                // Before saving the session: the step service merges today's server count once
+                StepCounterService.markServerMergePending(context)
                 tokenManager.saveSession(
                     token = body.token,
                     userId = body.user.id,

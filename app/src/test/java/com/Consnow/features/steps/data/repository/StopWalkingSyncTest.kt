@@ -37,8 +37,8 @@ class StopWalkingSyncTest {
     private fun repo(): StepsRepositoryImpl {
         val dao = fake<StepRecordDao> { name, _ ->
             when (name) {
-                "getRecordsByStatus" -> pending
-                "getRecordByDate" -> record
+                "getRecordsByStatusForUser" -> pending
+                "getRecord" -> record
                 "markSyncedIfUnchanged" -> { pending = emptyList(); 1 }
                 else -> throw AssertionError("Unexpected DAO call: $name")
             }
@@ -48,7 +48,7 @@ class StopWalkingSyncTest {
             sent += args[0] as SyncStepsRequest
             Response.success<Any>(Any())
         }
-        return StepsRepositoryImpl(dao, api)
+        return StepsRepositoryImpl(dao, api, currentUserId = { "me" })
     }
 
     @Test fun `stopping after steps already synced still tells the server isActive false`() = runBlocking {

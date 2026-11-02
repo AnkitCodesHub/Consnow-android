@@ -26,4 +26,3 @@ data class OwnActivityResponse(
     val isLocked: Boolean,      // your current lock status
     val isOnline: Boolean,      // your own online state (heartbeat freshness)
 )
-data class ActivityEventRequest(val occurredAt: Long) // epoch ms, captured at the broadcast

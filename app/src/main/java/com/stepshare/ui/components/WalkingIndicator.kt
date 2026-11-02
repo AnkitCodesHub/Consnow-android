@@ -41,6 +41,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.Consnow.core.common.TrustedClock
 import kotlinx.coroutines.delay
 import java.time.Instant
 import java.time.ZoneId
@@ -219,10 +220,10 @@ fun MovementStatus(
     walkerHeight: Dp = 72.dp,
 ) {
     // Re-evaluate the wording every 30 s so "43m ago" keeps counting.
-    val now by produceState(initialValue = System.currentTimeMillis()) {
+    val now by produceState(initialValue = TrustedClock.nowMs()) {
         while (true) {
             delay(30_000)
-            value = System.currentTimeMillis()
+            value = TrustedClock.nowMs()
         }
     }
 

@@ -21,6 +21,7 @@ import com.Consnow.ConsnowApp
 import com.Consnow.MainActivity
 import com.Consnow.core.common.ActivityEventBus
 import com.Consnow.core.common.OwnLockStatusEvent
+import com.Consnow.core.common.TrustedClock
 import com.Consnow.core.network.SocketManager
 import com.Consnow.core.network.api.ApiService
 import com.Consnow.core.network.dto.LockEventRequest
@@ -37,10 +38,15 @@ class StepCounterService : Service(), SensorEventListener {
     private var stepSensor: Sensor? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
-    private var initialSensorValue: Float? = null
+    // Today's step bookkeeping (see StepCounterLogic). Only read and changed on the main
+    // thread: sensor callbacks arrive there, and coroutines switch to Main before touching it.
+    private var counter = CounterState()
     private var lastSavedCount: Int = 0
+    private val mergeRunning = java.util.concurrent.atomic.AtomicBoolean(false)
 
     private var lastStepAt: Long = 0L
+    // Same moment on the trusted (server-corrected) clock: this is what gets stored and sent
+    private var lastStepTrustedAt: Long = 0L
     private var isCurrentlyActive: Boolean = false
     private var activityCheckJob: Job? = null
     private var syncDebounceJob: Job? = null
@@ -69,6 +75,12 @@ class StepCounterService : Service(), SensorEventListener {
         private const val KEY_LAST_TOTAL = "last_sensor_total"
         // Last computed step count for today, carried forward across a reboot.
         private const val KEY_LAST_COUNT = "last_today_count"
+        // userId the saved count belongs to
+        private const val KEY_OWNER = "count_owner"
+        // Counting started with no saved data (reinstall / cleared data): server count is added
+        private const val KEY_FRESH = "fresh_since_wipe"
+        // Set at login; cleared once today's server count has been merged in
+        private const val KEY_MERGE_PENDING = "server_merge_pending"
         const val SYNC_INTERVAL_MS = 1_000L
         const val SYNC_DEBOUNCE_MS = 1_000L
         // 15s of no steps = inactive (was 60s; reduced so friends see
@@ -89,6 +101,28 @@ class StepCounterService : Service(), SensorEventListener {
         fun stop(context: Context) {
             context.stopService(Intent(context, StepCounterService::class.java))
         }
+
+        /**
+         * Called on login/register, before the session is saved. The service then merges
+         * today's server count once (see runServerMergeIfPending).
+         */
+        fun markServerMergePending(context: Context) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_MERGE_PENDING, true).apply()
+        }
+
+        /**
+         * True until the login merge is done. Step syncs wait while this is true so the
+         * server can't take in steps that are about to be added to its own count.
+         */
+        fun isServerMergePending(context: Context): Boolean =
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .getBoolean(KEY_MERGE_PENDING, false)
+
+        private fun clearServerMergePending(context: Context) {
+            context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                .edit().putBoolean(KEY_MERGE_PENDING, false).apply()
+        }
     }
 
     override fun onCreate() {
@@ -106,6 +140,12 @@ class StepCounterService : Service(), SensorEventListener {
         restoreState()
         startPeriodicSync()
         startActivityCheck()
+        // Date check + removal of future-dated rows right away, not after the first 15s tick
+        serviceScope.launch {
+            try { checkAndResetForNewDay() } catch (e: CancellationException) { throw e } catch (_: Exception) {}
+        }
+        // Brings in today's server count once after a login (no-op otherwise)
+        runServerMergeIfPending()
 
         // Connect WebSocket with the CURRENT JWT and reconnect whenever it changes.
         // Before, the socket kept the token it started with: once that expired the
@@ -118,6 +158,8 @@ class StepCounterService : Service(), SensorEventListener {
                 if (!token.isNullOrEmpty()) {
                     socketManager = SocketManager(BuildConfig.API_BASE_URL, token)
                     socketManager?.connect()
+                    // A login while the service was already running
+                    runServerMergeIfPending()
                 }
             }
         }
@@ -244,6 +286,8 @@ class StepCounterService : Service(), SensorEventListener {
                     val app = application as ConsnowApp
                     // Reset baseline if day rolled over while phone was idle (no steps = no sensor event)
                     checkAndResetForNewDay()
+                    // Login merge still waiting (e.g. no internet at login): try again
+                    runServerMergeIfPending()
                     // Renews the JWT once a day while online, so active users never hit expiry
                     app.appContainer.authRepository.refreshTokenIfStale()
                     val result = app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive)
@@ -255,21 +299,22 @@ class StepCounterService : Service(), SensorEventListener {
         }
     }
 
-    private fun checkAndResetForNewDay() {
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val savedDate = prefs.getString(KEY_DATE, null)
-        val today = java.time.LocalDate.now().toString()
-        if (savedDate != null && savedDate != today) {
-            // Day changed while idle — reset in-memory baseline so next step event starts from 0
-            initialSensorValue = null
-            lastSavedCount = 0
-            prefs.edit()
-                .putString(KEY_DATE, today)
-                .putInt(KEY_ACCUMULATED, 0)
-                .putInt(KEY_LAST_COUNT, 0)
-                .apply()
-            Log.d("StepSync", "New day detected in periodic sync, baseline reset")
+    // Date check while the phone is still (no steps = no sensor event). Also moves a count
+    // saved under a future date (clock was set ahead) back to today and deletes future rows.
+    private suspend fun checkAndResetForNewDay() {
+        val today = TrustedClock.today()
+        val changed = withContext(Dispatchers.Main) {
+            val before = counter.date
+            counter = StepCounterLogic.onDayCheck(counter, today)
+            if (counter.date == before) return@withContext null
+            saveState()
+            lastSavedCount = counter.lastCount
+            updateNotification(counter.lastCount)
+            Log.d("StepSync", "Day check: $before -> ${counter.date}, count=${counter.lastCount}")
+            counter
         }
+        (application as ConsnowApp).appContainer.stepsRepository.deleteFutureRecords(today)
+        if (changed != null && changed.lastCount > 0) persistSteps(changed)
     }
 
     // Flips isCurrentlyActive → false after ACTIVITY_TIMEOUT_MS of no steps.
@@ -292,65 +337,36 @@ class StepCounterService : Service(), SensorEventListener {
         if (event.sensor?.type != Sensor.TYPE_STEP_COUNTER) return
 
         lastStepAt = System.currentTimeMillis()
+        lastStepTrustedAt = TrustedClock.nowMs()
         isCurrentlyActive = true
 
-        val totalSinceReboot = event.values[0]
-        val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-        val today = java.time.LocalDate.now().toString()
-        val savedDate = prefs.getString(KEY_DATE, null)
-        val lastTotal = prefs.getFloat(KEY_LAST_TOTAL, -1f)
+        // New day, phone reboot and future-date repair are all handled in StepCounterLogic
+        counter = StepCounterLogic.onReading(counter, event.values[0], TrustedClock.today())
+        saveState()
 
-        if (savedDate != today) {
-            // New day — reset baseline so steps start from 0
-            initialSensorValue = totalSinceReboot
-            prefs.edit()
-                .putFloat(KEY_INITIAL_VALUE, totalSinceReboot)
-                .putString(KEY_DATE, today)
-                .putInt(KEY_ACCUMULATED, 0)
-                .putInt(KEY_LAST_COUNT, 0)
-                .apply()
-        } else if (lastTotal >= 0f && totalSinceReboot < lastTotal) {
-            // Sensor went backwards = phone rebooted today (TYPE_STEP_COUNTER restarts at 0).
-            // Keep the steps already counted today and count everything since boot on top.
-            // Previously the old baseline stayed, so today's count froze at 0 new steps.
-            initialSensorValue = 0f
-            prefs.edit()
-                .putFloat(KEY_INITIAL_VALUE, 0f)
-                .putInt(KEY_ACCUMULATED, prefs.getInt(KEY_LAST_COUNT, 0))
-                .apply()
-        }
-
-        if (initialSensorValue == null) {
-            initialSensorValue = totalSinceReboot
-            prefs.edit().putFloat(KEY_INITIAL_VALUE, totalSinceReboot).apply()
-        }
-
-        val todaySteps = (totalSinceReboot - (initialSensorValue ?: totalSinceReboot)).toInt()
-            .coerceAtLeast(0) + prefs.getInt(KEY_ACCUMULATED, 0)
-
-        prefs.edit()
-            .putLong(KEY_LAST_STEP_AT, lastStepAt)
-            .putFloat(KEY_LAST_TOTAL, totalSinceReboot)
-            .putInt(KEY_LAST_COUNT, todaySteps)
-            .apply()
-
-        if (todaySteps != lastSavedCount) {
-            lastSavedCount = todaySteps
-            persistSteps(todaySteps)
-            updateNotification(todaySteps)
+        if (counter.lastCount != lastSavedCount) {
+            lastSavedCount = counter.lastCount
+            persistSteps(counter)
+            updateNotification(counter.lastCount)
         }
     }
 
-    // Saves steps to Room then schedules a network sync
-    private fun persistSteps(count: Int) {
+    // Saves steps to Room then schedules a network sync.
+    // Only for the account that owns the count: right after a login the count may still
+    // belong to the previous account until runServerMergeIfPending claims it.
+    private fun persistSteps(snapshot: CounterState) {
+        val owner = snapshot.owner ?: return
+        val date = snapshot.date ?: return
+        val count = snapshot.lastCount
+        val stepAt = lastStepTrustedAt.takeIf { it > 0 } ?: TrustedClock.nowMs()
         serviceScope.launch {
             try {
                 val app = application as ConsnowApp
-                val userId = app.appContainer.tokenManager.getUserId() ?: return@launch
-                app.appContainer.stepsRepository.updateLocalSteps(userId, count)
+                if (app.appContainer.tokenManager.getUserId() != owner) return@launch
+                app.appContainer.stepsRepository.updateLocalSteps(owner, count, date, stepAt)
                 scheduleSync()
-            } catch (_: CancellationException) {
-                throw CancellationException()
+            } catch (e: CancellationException) {
+                throw e
             } catch (_: Exception) {}
         }
     }
@@ -387,13 +403,82 @@ class StepCounterService : Service(), SensorEventListener {
         }
     }
 
-    // Restores sensor baseline from SharedPreferences after service restart
+    // Restores the counter from SharedPreferences after a service restart
     private fun restoreState() {
         val prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val savedDate = prefs.getString(KEY_DATE, null)
-        val today = java.time.LocalDate.now().toString()
-        if (savedDate == today) {
-            initialSensorValue = prefs.getFloat(KEY_INITIAL_VALUE, 0f)
+        counter = CounterState(
+            owner = prefs.getString(KEY_OWNER, null),
+            date = savedDate,
+            initial = if (prefs.contains(KEY_INITIAL_VALUE)) prefs.getFloat(KEY_INITIAL_VALUE, 0f) else null,
+            accumulated = prefs.getInt(KEY_ACCUMULATED, 0),
+            lastTotal = prefs.getFloat(KEY_LAST_TOTAL, -1f),
+            lastCount = prefs.getInt(KEY_LAST_COUNT, 0),
+            // No saved day at all = fresh install or cleared data. A phone updated from an
+            // older app version has a saved day but no flag yet, so it is not fresh.
+            freshSinceWipe = if (prefs.contains(KEY_FRESH)) prefs.getBoolean(KEY_FRESH, false)
+                             else savedDate == null,
+        )
+    }
+
+    private fun saveState() {
+        val c = counter
+        getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE).edit().apply {
+            putString(KEY_OWNER, c.owner)           // null removes the key
+            putString(KEY_DATE, c.date)
+            if (c.initial != null) putFloat(KEY_INITIAL_VALUE, c.initial) else remove(KEY_INITIAL_VALUE)
+            putInt(KEY_ACCUMULATED, c.accumulated)
+            putFloat(KEY_LAST_TOTAL, c.lastTotal)
+            putInt(KEY_LAST_COUNT, c.lastCount)
+            putBoolean(KEY_FRESH, c.freshSinceWipe)
+            if (lastStepTrustedAt > 0) putLong(KEY_LAST_STEP_AT, lastStepTrustedAt)
+        }.apply()
+    }
+
+    /**
+     * Login merge: brings in today's count from the server once after each login.
+     *  - phone data was wiped (reinstall / clear data) -> server count + steps counted since
+     *  - phone data intact (logged out and back in)    -> whichever is higher
+     * Never lowers the count and never counts the same steps twice. Step syncs wait until
+     * this is done (isServerMergePending), and it retries every 15s while offline.
+     */
+    private fun runServerMergeIfPending() {
+        if (!isServerMergePending(this)) return
+        if (!mergeRunning.compareAndSet(false, true)) return
+        serviceScope.launch {
+            try {
+                val app = application as ConsnowApp
+                val repo = app.appContainer.stepsRepository
+                val userId = app.appContainer.tokenManager.getUserId() ?: return@launch
+                withContext(Dispatchers.Main) {
+                    counter = StepCounterLogic.claimFor(counter, userId)
+                    saveState()
+                }
+                val date = TrustedClock.today()
+                val serverCount = repo.fetchServerStepCount(date) ?: return@launch // offline: retried
+                val merged = withContext(Dispatchers.Main) {
+                    if (counter.owner != userId) return@withContext null // account changed meanwhile
+                    val m = StepCounterLogic.mergeServer(counter, serverCount, date, TrustedClock.today())
+                        ?: return@withContext null // midnight passed during the request: retried
+                    counter = m
+                    saveState()
+                    lastSavedCount = m.lastCount
+                    updateNotification(m.lastCount)
+                    m
+                } ?: return@launch
+                val stepAt = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .getLong(KEY_LAST_STEP_AT, 0L).takeIf { it > 0 } ?: TrustedClock.nowMs()
+                repo.mergeLocalSteps(userId, date, merged.lastCount, merged.lastCount > serverCount, stepAt)
+                clearServerMergePending(this@StepCounterService)
+                Log.d("StepSync", "Login merge done: server=$serverCount, today=${merged.lastCount}")
+                startSync()
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                Log.e("StepSync", "Login merge failed: ${e.message}")
+            } finally {
+                mergeRunning.set(false)
+            }
         }
     }
 
