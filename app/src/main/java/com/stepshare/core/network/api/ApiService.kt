@@ -48,6 +48,13 @@ interface ApiService {
         @Query("date") date: String
     ): Response<PeerStepsResponse>
 
+    // Who's watching you
+    @POST("profile-views/{ownerId}")
+    suspend fun recordProfileView(@Path("ownerId") ownerId: String): Response<Any>
+
+    @GET("profile-views")
+    suspend fun getProfileViews(@Query("since") since: String): Response<List<ProfileViewResponse>>
+
     // Activity — lock/unlock/heartbeat
     @PUT("activity/unlock")
     suspend fun reportUnlock(@Body body: LockEventRequest): Response<UnlockResponse>

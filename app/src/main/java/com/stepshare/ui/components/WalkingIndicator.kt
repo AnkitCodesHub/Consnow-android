@@ -23,6 +23,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -38,6 +41,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -204,11 +208,11 @@ private fun DrawScope.drawWalker(t: Float, color: Color, showGround: Boolean, wa
  * Replaces the plain "Walking" / "Last moved X ago" text.
  *
  *  - Walking  → big animated walker + "Walking now"
- *  - Not      → chip with a standing figure; wording and color fade with time:
- *      < 2 min          "Just stopped walking"     teal
- *      < 1 h            "Last moved 43m ago"       soft teal
- *      earlier today    "Last moved at 9:10 am"    grey
- *      not today / none "Hasn't moved yet today"   dim grey
+ *  - Not      → one line of plain text; color fades with time:
+ *      < 1 min    "Last moved 42s ago"
+ *      < 1 h      "Last moved 10min ago"
+ *      < 1 day    "Last moved 4h 47min ago"
+ *      older      "Last moved 2d ago"
  *
  * @param lastActiveAt ISO-8601 timestamp of the last step (as the API returns it)
  */
@@ -219,10 +223,10 @@ fun MovementStatus(
     modifier: Modifier = Modifier,
     walkerHeight: Dp = 72.dp,
 ) {
-    // Re-evaluate the wording every 30 s so "43m ago" keeps counting.
+    // Re-evaluate every second so "x mins x secs ago" keeps counting.
     val now by produceState(initialValue = TrustedClock.nowMs()) {
         while (true) {
-            delay(30_000)
+            delay(1_000)
             value = TrustedClock.nowMs()
         }
     }
@@ -264,30 +268,30 @@ private fun WalkingBig(walkerHeight: Dp) {
 
 private enum class Recency { JUST_NOW, WITHIN_HOUR, EARLIER_TODAY, NOT_TODAY }
 
-private data class LastMoved(val title: String, val subtitle: String, val recency: Recency)
+private data class LastMoved(val title: String, val recency: Recency)
 
 private fun lastMovedInfo(lastActiveAt: String?, nowMs: Long): LastMoved {
     val then = lastActiveAt?.let { runCatching { Instant.parse(it) }.getOrNull() }
-        ?: return LastMoved("Hasn't moved yet today", "no steps today", Recency.NOT_TODAY)
+        ?: return LastMoved("Hasn't moved yet", Recency.NOT_TODAY)
 
-    val zone = ZoneId.systemDefault()
-    val thenDate = then.atZone(zone).toLocalDate()
-    val today = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalDate()
-    val minutes = ((nowMs - then.toEpochMilli()) / 60_000).coerceAtLeast(0)
+    // Clamp at 0 so a friend's clock running ahead never shows a negative time.
+    val totalSecs = ((nowMs - then.toEpochMilli()) / 1000).coerceAtLeast(0)
+    val days = totalSecs / 86_400
+    val hours = (totalSecs % 86_400) / 3_600
+    val mins = (totalSecs % 3_600) / 60
 
-    if (thenDate.isBefore(today)) {
-        val days = java.time.temporal.ChronoUnit.DAYS.between(thenDate, today)
-        val sub = if (days == 1L) "last moved yesterday" else "last moved ${days}d ago"
-        return LastMoved("Hasn't moved yet today", sub, Recency.NOT_TODAY)
-    }
     return when {
-        minutes < 2 -> LastMoved("Just stopped walking", "less than 2 min ago", Recency.JUST_NOW)
-        minutes < 60 -> LastMoved("Last moved ${minutes}m ago", "within the hour", Recency.WITHIN_HOUR)
-        else -> {
-            val time = then.atZone(zone).format(DateTimeFormatter.ofPattern("h:mm a", Locale.getDefault()))
-                .lowercase(Locale.getDefault())
-            LastMoved("Last moved at $time", "earlier today", Recency.EARLIER_TODAY)
+        totalSecs < 5 -> LastMoved("Last moved just now", Recency.JUST_NOW)
+        days > 0 -> LastMoved("Last moved ${days}d ago", Recency.NOT_TODAY)
+        hours > 0 -> {
+            val m = if (mins > 0) " ${mins}min" else ""
+            LastMoved("Last moved ${hours}h$m ago", Recency.EARLIER_TODAY)
         }
+        mins > 0 -> LastMoved(
+            "Last moved ${mins}min ago",
+            if (mins < 2) Recency.JUST_NOW else Recency.WITHIN_HOUR,
+        )
+        else -> LastMoved("Last moved ${totalSecs}s ago", Recency.JUST_NOW)
     }
 }
 
@@ -302,37 +306,26 @@ private fun LastMovedChip(lastMoved: LastMoved) {
         Recency.EARLIER_TODAY -> grey
         Recency.NOT_TODAY -> grey.copy(alpha = 0.85f)
     }
-
-    // Brighter text than the chip tint so it stays readable on a dark background.
     val textColor = lerp(color, MaterialTheme.colorScheme.onSurface, 0.3f)
 
-    // Large, high-contrast chip for low-vision readers. Sizes are in sp, so they
-    // also grow with the phone's font-size setting; text wraps instead of being cut off.
-    Row(
-        modifier = Modifier
-            .padding(horizontal = 16.dp)
-            .heightIn(min = 72.dp)
-            .background(color.copy(alpha = 0.24f), RoundedCornerShape(36.dp))
-            .border(1.5.dp, color.copy(alpha = 0.55f), RoundedCornerShape(36.dp))
-            .padding(start = 14.dp, end = 24.dp, top = 12.dp, bottom = 12.dp)
-            .semantics(mergeDescendants = true) {},
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        WalkingFigure(
-            modifier = Modifier.size(48.dp),
-            color = color,
-            walking = false,
-        )
-        Spacer(Modifier.width(12.dp))
-        Column {
-            Text(
-                text = lastMoved.title,
-                color = textColor,
-                fontSize = 21.sp,
-                lineHeight = 26.sp,
-                fontWeight = FontWeight.Bold,
-                maxLines = 2,
-            )
-        }
-    }
+    // Plain one-line text: no border, background or icon.
+    // Always one line: if it doesn't fit (big phone font setting), shrink it a bit until it does.
+    var fontSize by remember { mutableStateOf(22.sp) }
+    Text(
+        text = lastMoved.title,
+        modifier = Modifier.padding(horizontal = 16.dp),
+        color = textColor,
+        fontSize = fontSize,
+        fontWeight = FontWeight.Bold,
+        // Tabular digits so the text doesn't jiggle as the seconds tick.
+        style = MaterialTheme.typography.titleMedium.copy(fontFeatureSettings = "tnum"),
+        textAlign = TextAlign.Center,
+        maxLines = 1,
+        softWrap = false,
+        onTextLayout = { result ->
+            if (result.hasVisualOverflow && fontSize.value > 14f) {
+                fontSize = (fontSize.value - 1f).sp
+            }
+        },
+    )
 }

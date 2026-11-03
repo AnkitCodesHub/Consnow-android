@@ -134,21 +134,14 @@ fun StepCard(
                 if (name != null) {
                     Text(
                         text = name,
-                        style = MaterialTheme.typography.labelMedium,
+                        style = MaterialTheme.typography.labelMedium.copy(
+                            fontWeight = FontWeight.SemiBold
+                        ),
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         maxLines = 1
                     )
-                    Spacer(Modifier.height(2.dp))
+                    Spacer(Modifier.height(4.dp))
                 }
-
-                // Walking emoji with bounce
-                Text(
-                    text = "🚶",  // 🚶
-                    fontSize = 24.sp,
-                    modifier = Modifier.offset(y = bounceOffset.dp)
-                )
-
-                Spacer(Modifier.height(4.dp))
 
                 // Step count
                 Text(

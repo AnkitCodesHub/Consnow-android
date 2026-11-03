@@ -42,6 +42,15 @@ import com.Consnow.features.steps.domain.model.StepsState
 import com.Consnow.ui.components.LockStatusWidget
 import com.Consnow.ui.components.MovementStatus
 import com.Consnow.ui.components.StepCard
+import com.Consnow.ui.components.ProfileWatcher
+import com.Consnow.ui.components.WhosWatchingPopup
+import com.Consnow.ui.components.onHoldFor
+import com.Consnow.ui.components.cardScale
+import com.Consnow.ui.components.WatchersHintBadge
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.ui.graphics.graphicsLayer
 //edited on 26/10/2026
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -71,7 +80,12 @@ fun HomeScreen(
     ownLastUnlockedAtMs: Long = 0L,
     peerStatuses: Map<String, PeerLiveStatus> = emptyMap(),
     isOffline: Boolean = false, // phone has no internet: show the friendly offline note
+    profileWatchers: List<ProfileWatcher> = emptyList(), // friends who opened your profile today
+    onShowWatchers: () -> Unit = {}, // asks for a fresh list when the popup opens
 ) {
+    var watchersMounted by remember { mutableStateOf(false) } // popup exists (incl. slide-out)
+    var watchersHeld by remember { mutableStateOf(false) } // finger is still down after the hold time
+    var cardPressed by remember { mutableStateOf(false) } // finger is down (any time)
     val context = LocalContext.current
 
     // Ask for everything in ONE request. Two separate launch() calls at the same moment
@@ -161,10 +175,35 @@ fun HomeScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            StepCard(
-                stepCount = stepsState.todaySteps,
-                isActive = stepsState.isActive
+            // Pops in while pressed, pops out while the list is showing (springy)
+            val cardScaleAnim by animateFloatAsState(
+                targetValue = cardScale(pressed = cardPressed, held = watchersHeld),
+                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessMedium),
+                label = "watchersCardScale",
             )
+            Box(
+                modifier = Modifier
+                    .graphicsLayer { scaleX = cardScaleAnim; scaleY = cardScaleAnim }
+                    .onHoldFor(
+                        onRelease = { watchersHeld = false },
+                        onPressChange = { cardPressed = it },
+                        onHold = { watchersMounted = true; watchersHeld = true; onShowWatchers() },
+                    )
+            ) {
+                StepCard(
+                    stepCount = stepsState.todaySteps,
+                    isActive = stepsState.isActive
+                )
+                // Static eye: shows this card can be held to see who viewed you
+                WatchersHintBadge(modifier = Modifier.align(Alignment.TopEnd).padding(10.dp))
+            }
+            if (watchersMounted) {
+                WhosWatchingPopup(
+                    watchers = profileWatchers,
+                    show = watchersHeld,
+                    onGone = { watchersMounted = false }
+                )
+            }
 
             Spacer(modifier = Modifier.height(12.dp))
 

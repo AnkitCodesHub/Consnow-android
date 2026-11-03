@@ -19,6 +19,8 @@ import com.Consnow.features.steps.data.cache.PeerProfileCache
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.launch
+import com.Consnow.ui.components.ProfileWatcher
 import com.Consnow.features.steps.presentation.*
 
 object Routes {
@@ -127,6 +129,10 @@ fun ConsnowNavHost() {
             val isOnline by c.networkMonitor.isOnline
                 .collectAsState(initial = c.networkMonitor.isOnlineNow())
 
+            // Who opened my profile today (loaded when the steps card is held)
+            var profileWatchers by remember { mutableStateOf<List<ProfileWatcher>>(emptyList()) }
+            val watchersScope = rememberCoroutineScope()
+
             HomeScreen(
                 stepsState = stepsState,
                 connectionsState = connectionsState,
@@ -159,6 +165,10 @@ fun ConsnowNavHost() {
                 ownLastUnlockedAtMs = ownLastUnlockedAtMs,
                 peerStatuses = peerStatuses,
                 isOffline = !isOnline,
+                profileWatchers = profileWatchers,
+                onShowWatchers = {
+                    watchersScope.launch { fetchWatchers(c.apiService)?.let { profileWatchers = it } }
+                },
             )
         }
 
@@ -196,6 +206,9 @@ fun ConsnowNavHost() {
             val peerIsLocked by peerStepsViewModel.isLocked.collectAsState()
 //            val peerIsOnline by peerStepsViewModel.isOnline.collectAsState()
             val peerLastUnlockedAtMs by peerStepsViewModel.lastUnlockedAtMs.collectAsState()
+
+            // Tell the server this friend's profile was opened (it ignores repeats within 5 min)
+            LaunchedEffect(peerId) { runCatching { c.apiService.recordProfileView(peerId) } }
 
             // Start auto-refreshing peer steps every 5s when this screen is visible
             LaunchedEffect(Unit) { peerStepsViewModel.startAutoRefresh() }

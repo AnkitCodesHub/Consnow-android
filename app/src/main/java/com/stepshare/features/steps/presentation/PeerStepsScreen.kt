@@ -171,6 +171,17 @@ fun PeerStepsScreen(
 
                 Spacer(modifier = Modifier.weight(1f))
 
+                // Consent notice: opening a friend's profile is visible to them
+                if (!state.isLoading && state.error == null && state.peerName.isNotBlank()) {
+                    Text(
+                        text = "${state.peerName} can see that you viewed their profile",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(bottom = 12.dp)
+                    )
+                }
+
                 // Peer phone lock status
                 LockStatusWidget(
                     isLocked = isLocked,
