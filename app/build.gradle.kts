@@ -13,8 +13,8 @@ android {
         applicationId = "com.Consnow"
         minSdk = 26
         targetSdk = 36
-        versionCode = 8
-        versionName = "1.4.0"
+        versionCode = 9
+        versionName = "1.5.0"
         buildConfigField("String", "API_BASE_URL", "\"https://consnow-backend-production.up.railway.app/\"")
     }
 
@@ -33,6 +33,17 @@ android {
 
     kotlinOptions {
         jvmTarget = "17"
+    }
+
+    buildTypes {
+        release {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
     }
 
     compileOptions {
