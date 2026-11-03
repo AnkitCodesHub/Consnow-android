@@ -38,6 +38,8 @@ import com.Consnow.features.steps.domain.model.PeerStepsState
 import com.Consnow.ui.components.LockStatusWidget
 import com.Consnow.ui.components.MovementStatus
 import com.Consnow.ui.components.StepCard
+import com.Consnow.features.connections.domain.model.PeerInfo
+import com.Consnow.features.connections.presentation.DisconnectedPeerPanel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -47,7 +49,14 @@ fun PeerStepsScreen(
     onBack: () -> Unit,
     isLocked: Boolean = true,
     lastUnlockedAtMs: Long = 0L,
+    // This friend's connection; when not connected the profile shows "Disconnected" + Connect
+    connection: PeerInfo? = null,
+    onConnect: () -> Unit = {},
+    onCancelRequest: () -> Unit = {},
+    onAcceptRequest: () -> Unit = {},
+    onDeclineRequest: () -> Unit = {},
 ) {
+    val notConnected = connection != null && !connection.isConnected
     val scope = rememberCoroutineScope()
 
     // Pull down anywhere on the screen to refresh (like YouTube / Chrome).
@@ -93,6 +102,17 @@ fun PeerStepsScreen(
 
                 // Loading, error, or peer details
                 when {
+                    // Consent: nothing about the friend's activity is drawn while not connected
+                    notConnected -> {
+                        DisconnectedPeerPanel(
+                            peer = connection!!,
+                            onConnect = onConnect,
+                            onCancelRequest = onCancelRequest,
+                            onAccept = onAcceptRequest,
+                            onDecline = onDeclineRequest,
+                        )
+                    }
+
                     state.isLoading -> {
                         CircularProgressIndicator(
                             color = MaterialTheme.colorScheme.primary
@@ -171,25 +191,16 @@ fun PeerStepsScreen(
 
                 Spacer(modifier = Modifier.weight(1f))
 
-                // Consent notice: opening a friend's profile is visible to them
-                if (!state.isLoading && state.error == null && state.peerName.isNotBlank()) {
-                    Text(
-                        text = "${state.peerName} can see that you viewed their profile",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(bottom = 12.dp)
+                // Peer phone lock status (hidden while not connected)
+                if (!notConnected) {
+                    LockStatusWidget(
+                        isLocked = isLocked,
+                        lastUnlockedAtMs = lastUnlockedAtMs,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 32.dp)
                     )
                 }
-
-                // Peer phone lock status
-                LockStatusWidget(
-                    isLocked = isLocked,
-                    lastUnlockedAtMs = lastUnlockedAtMs,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(bottom = 32.dp)
-                )
             }
         }
 

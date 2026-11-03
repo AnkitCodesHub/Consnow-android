@@ -53,6 +53,7 @@ import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -88,6 +89,9 @@ fun vibrateTick(context: Context, ms: Long = 40L) {
         // no vibrator or permission: silently skip
     }
 }
+
+/** "Sangita Pandey" -> "Sangita". Only the first word of a name is shown. */
+fun firstName(full: String): String = full.trim().split(Regex("\\s+")).firstOrNull().orEmpty()
 
 /** The list shown in the popup: newest first, never more than 3. */
 fun visibleWatchers(all: List<ProfileWatcher>): List<ProfileWatcher> =
@@ -190,30 +194,35 @@ fun WhosWatchingPopup(
                         )
                     } else {
                         rows.forEach { w ->
+                            val name = firstName(w.name)
                             Row(
                                 modifier = Modifier.fillMaxWidth().height(44.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Box(
-                                    modifier = Modifier.size(32.dp)
+                                    modifier = Modifier.size(30.dp)
                                         .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape),
                                     contentAlignment = Alignment.Center,
                                 ) {
-                                    Text(w.name.take(1).uppercase(), fontSize = 14.sp, fontWeight = FontWeight.Bold)
+                                    Text(name.take(1).uppercase(), fontSize = 14.sp, fontWeight = FontWeight.Bold)
                                 }
-                                Spacer(Modifier.width(12.dp))
-                                Text(
-                                    w.name,
-                                    fontSize = 15.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1,
-                                    modifier = Modifier.weight(1f),
-                                )
-                                Text(
-                                    formatTimeAgoFromMillis(w.openedAtMs),
-                                    fontSize = 13.sp,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                                Spacer(Modifier.width(10.dp))
+                                // Name on top, time under it: the name gets the whole row width
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        name,
+                                        fontSize = 15.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                    Text(
+                                        formatTimeAgoFromMillis(w.openedAtMs),
+                                        fontSize = 12.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                    )
+                                }
                             }
                         }
                     }
@@ -226,13 +235,7 @@ fun WhosWatchingPopup(
 /** Small static eye on the steps card: tells people the card can be held to see who viewed you. */
 @Composable
 fun WatchersHintBadge(modifier: Modifier = Modifier) {
-    val accent = Color(0xFF2DD4BF)
-    Box(
-        modifier = modifier
-            .size(30.dp)
-            .background(accent.copy(alpha = 0.07f), CircleShape),
-        contentAlignment = Alignment.Center,
-    ) { EyeIcon(color = accent.copy(alpha = 0.45f), modifier = Modifier.size(17.dp)) }
+    EyeIcon(color = Color(0xFF2DD4BF).copy(alpha = 0.45f), modifier = modifier.size(22.dp))
 }
 
 @Composable

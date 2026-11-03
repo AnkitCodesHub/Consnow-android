@@ -22,11 +22,15 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.launch
 import com.Consnow.ui.components.ProfileWatcher
 import com.Consnow.features.steps.presentation.*
+import com.Consnow.features.connections.presentation.RequestsScreen
+import com.Consnow.features.connections.domain.model.PeerInfo
+import androidx.navigation.NavBackStackEntry
 
 object Routes {
     const val AUTH = "auth"
     const val HOME = "home"
     const val CONNECT = "connect"
+    const val REQUESTS = "requests"
     const val PEER_STEPS = "peer_steps/{peerId}"
     fun peerSteps(peerId: String) = "peer_steps/$peerId"
 }
@@ -85,6 +89,7 @@ fun ConsnowNavHost() {
                     connectUseCase = c.connectUseCase,
                     getConnectionsUseCase = c.getConnectionsUseCase,
                     tokenManager = c.tokenManager,
+                    repository = c.connectionsRepository,
                 )
             )
             val stepsState by stepsViewModel.state.collectAsState()
@@ -101,13 +106,15 @@ fun ConsnowNavHost() {
             )
             val peerStatuses by peerStatusesViewModel.statuses.collectAsState()
             LaunchedEffect(connectionsState.connections) {
-                peerStatusesViewModel.track(connectionsState.connections.map { it.id })
+                // Only connected friends are polled / prefetched; disconnected ones share nothing
+                val connectedPeers = connectionsState.connections.filter { it.isConnected }
+                peerStatusesViewModel.track(connectedPeers.map { it.id })
 
                 // Prefetch each friend's steps once per Home visit so opening a profile
                 // shows real numbers immediately instead of a spinner
                 connectionsState.connections.forEach { PeerProfileCache.putName(it.id, it.name) }
                 coroutineScope {
-                    connectionsState.connections.map { peer ->
+                    connectedPeers.map { peer ->
                         async {
                             val r = c.getPeerStepsUseCase(peer.id)
                             if (r is Result.Success) {
@@ -169,6 +176,15 @@ fun ConsnowNavHost() {
                 onShowWatchers = {
                     watchersScope.launch { fetchWatchers(c.apiService)?.let { profileWatchers = it } }
                 },
+                onDisconnect = { connectionsViewModel.disconnect(it) },
+                onRequestConnect = { connectionsViewModel.requestConnect(it) },
+                onCancelRequest = { connectionsViewModel.cancelRequest(it) },
+                onAcceptRequest = { peer -> acceptOrConnect(connectionsViewModel, peer) },
+                onDeclineRequest = { peer -> peer.requestId?.let { connectionsViewModel.declineRequest(it, peer.id) } },
+                onUndoDisconnect = { connectionsViewModel.undoDisconnect() },
+                onUndoGone = { connectionsViewModel.dismissUndo() },
+                onMessageShown = { connectionsViewModel.consumeMessage() },
+                onRequestsClick = { navController.navigate(Routes.REQUESTS) },
             )
         }
 
@@ -179,6 +195,7 @@ fun ConsnowNavHost() {
                     connectUseCase = c.connectUseCase,
                     getConnectionsUseCase = c.getConnectionsUseCase,
                     tokenManager = c.tokenManager,
+                    repository = c.connectionsRepository,
                 )
             )
             val state by connectionsViewModel.state.collectAsState()
@@ -186,6 +203,19 @@ fun ConsnowNavHost() {
                 state = state,
                 onConnect = { code -> connectionsViewModel.connect(code) },
                 onBack = { navController.popBackStack() }
+            )
+        }
+
+        // ── Requests inbox ───────────────────────────────────────────────────
+        composable(Routes.REQUESTS) { entry ->
+            val connectionsViewModel = sharedConnectionsViewModel(navController, entry, c)
+            val state by connectionsViewModel.state.collectAsState()
+            LaunchedEffect(Unit) { connectionsViewModel.loadRequests() }
+            RequestsScreen(
+                requests = state.requests,
+                onAccept = { connectionsViewModel.acceptRequest(it.id, it.fromId) },
+                onDecline = { connectionsViewModel.declineRequest(it.id, it.fromId) },
+                onBack = { navController.popBackStack() },
             )
         }
 
@@ -213,6 +243,11 @@ fun ConsnowNavHost() {
             // Start auto-refreshing peer steps every 5s when this screen is visible
             LaunchedEffect(Unit) { peerStepsViewModel.startAutoRefresh() }
 
+            // Same friends list as Home, so connect / disconnect shows here instantly too
+            val connectionsViewModel = sharedConnectionsViewModel(navController, backStackEntry, c)
+            val connectionsState by connectionsViewModel.state.collectAsState()
+            val connection = connectionsState.connections.firstOrNull { it.id == peerId }
+
             PeerStepsScreen(
                 state = state,
                 onRefresh = { peerStepsViewModel.refresh() },
@@ -220,7 +255,41 @@ fun ConsnowNavHost() {
                 isLocked = peerIsLocked,
 //                isOnline = peerIsOnline,
                 lastUnlockedAtMs = peerLastUnlockedAtMs,
+                connection = connection,
+                onConnect = { connection?.let { connectionsViewModel.requestConnect(it) } },
+                onCancelRequest = { connection?.let { connectionsViewModel.cancelRequest(it) } },
+                onAcceptRequest = { connection?.let { acceptOrConnect(connectionsViewModel, it) } },
+                onDeclineRequest = { connection?.requestId?.let { connectionsViewModel.declineRequest(it, peerId) } },
             )
         }
     }
+}
+
+/**
+ * The Home screen's ConnectionsViewModel, reused by the friend profile and requests screens so
+ * a tap on one screen shows on the others at once. Falls back to a screen-local one if Home
+ * isn't on the back stack.
+ */
+@Composable
+private fun sharedConnectionsViewModel(
+    navController: androidx.navigation.NavHostController,
+    entry: NavBackStackEntry,
+    c: com.Consnow.AppContainer,
+): ConnectionsViewModel {
+    val owner = remember(entry) { runCatching { navController.getBackStackEntry(Routes.HOME) }.getOrDefault(entry) }
+    return viewModel(
+        viewModelStoreOwner = owner,
+        factory = ConnectionsViewModel.Factory(
+            connectUseCase = c.connectUseCase,
+            getConnectionsUseCase = c.getConnectionsUseCase,
+            tokenManager = c.tokenManager,
+            repository = c.connectionsRepository,
+        ),
+    )
+}
+
+/** Accept their request; with no request id (list not refreshed yet) send ours, which connects at once. */
+private fun acceptOrConnect(vm: ConnectionsViewModel, peer: PeerInfo) {
+    val id = peer.requestId
+    if (id != null) vm.acceptRequest(id, peer.id) else vm.requestConnect(peer)
 }

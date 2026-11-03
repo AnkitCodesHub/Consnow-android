@@ -65,6 +65,18 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarResult
+import com.Consnow.features.connections.domain.model.PendingUndo
+import com.Consnow.features.connections.domain.model.PeerConnectionStatus
+import com.Consnow.features.connections.presentation.ConnectionActionButton
+import com.Consnow.features.connections.presentation.RequestsBadgeButton
+import com.Consnow.features.connections.presentation.disconnectedStatusLine
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 
 @Composable
 fun HomeScreen(
@@ -82,6 +94,16 @@ fun HomeScreen(
     isOffline: Boolean = false, // phone has no internet: show the friendly offline note
     profileWatchers: List<ProfileWatcher> = emptyList(), // friends who opened your profile today
     onShowWatchers: () -> Unit = {}, // asks for a fresh list when the popup opens
+    // Connect / disconnect (button on the right of each friend row)
+    onDisconnect: (PeerInfo) -> Unit = {},
+    onRequestConnect: (PeerInfo) -> Unit = {},
+    onCancelRequest: (PeerInfo) -> Unit = {},
+    onAcceptRequest: (PeerInfo) -> Unit = {},
+    onDeclineRequest: (PeerInfo) -> Unit = {},
+    onUndoDisconnect: () -> Unit = {},
+    onUndoGone: () -> Unit = {},
+    onMessageShown: () -> Unit = {},
+    onRequestsClick: () -> Unit = {},
 ) {
     var watchersMounted by remember { mutableStateOf(false) } // popup exists (incl. slide-out)
     var watchersHeld by remember { mutableStateOf(false) } // finger is still down after the hold time
@@ -131,12 +153,50 @@ fun HomeScreen(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    // Friends split into online / offline for the list below
+    // Friends split into online / offline for the list below. Not-connected friends get
+    // their own section and never show any status data.
     val fp = friendsPalette()
-    val (onlinePeers, offlinePeers) = remember(connectionsState.connections, peerStatuses) {
-        connectionsState.connections.partition { peerStatuses[it.id]?.isUserActive == true }
+    val (connectedPeers, notConnectedPeers) = remember(connectionsState.connections) {
+        connectionsState.connections.partition { it.isConnected }
+            .let { (on, off) -> on to off.sortedBy { if (it.status == PeerConnectionStatus.REQUEST_RECEIVED) 0 else 1 } }
+    }
+    val (onlinePeers, offlinePeers) = remember(connectedPeers, peerStatuses) {
+        connectedPeers.partition { peerStatuses[it.id]?.isUserActive == true }
+    }
+    val friendButton: @Composable (PeerInfo) -> Unit = { peer ->
+        ConnectionActionButton(
+            peer = peer,
+            onDisconnect = { onDisconnect(peer) },
+            onConnect = { onRequestConnect(peer) },
+            onCancelRequest = { onCancelRequest(peer) },
+            onAccept = { onAcceptRequest(peer) },
+            onDecline = { onDeclineRequest(peer) },
+        )
     }
 
+    // "Disconnected from X · Undo" for 5 s, plus one-shot messages
+    val snackbarHostState = remember { SnackbarHostState() }
+    val pendingUndo: PendingUndo? = connectionsState.pendingUndo
+    LaunchedEffect(pendingUndo?.shownAtMs) {
+        snackbarHostState.currentSnackbarData?.dismiss()
+        val undo = pendingUndo ?: return@LaunchedEffect
+        val result = withTimeoutOrNull(5_000) {
+            snackbarHostState.showSnackbar(
+                message = "Disconnected from ${undo.peer.name.trim().substringBefore(' ')}",
+                actionLabel = "Undo",
+                duration = SnackbarDuration.Indefinite,
+            )
+        }
+        if (result == SnackbarResult.ActionPerformed) onUndoDisconnect() else onUndoGone()
+    }
+    val snackbarScope = rememberCoroutineScope()
+    LaunchedEffect(connectionsState.message) {
+        val text = connectionsState.message ?: return@LaunchedEffect
+        onMessageShown() // clears it in the ViewModel, so show it from a scope this effect doesn't own
+        snackbarScope.launch { snackbarHostState.showSnackbar(text, duration = SnackbarDuration.Short) }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
@@ -195,7 +255,7 @@ fun HomeScreen(
                     isActive = stepsState.isActive
                 )
                 // Static eye: shows this card can be held to see who viewed you
-                WatchersHintBadge(modifier = Modifier.align(Alignment.TopEnd).padding(10.dp))
+                WatchersHintBadge(modifier = Modifier.align(Alignment.TopStart).padding(14.dp))
             }
             if (watchersMounted) {
                 WhosWatchingPopup(
@@ -318,7 +378,7 @@ fun HomeScreen(
                         fontWeight = FontWeight.ExtraBold,
                         color = fp.ink
                     )
-                    if (connectionsState.connections.isNotEmpty()) {
+                    if (connectedPeers.isNotEmpty()) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
@@ -332,6 +392,10 @@ fun HomeScreen(
                     }
                 }
 
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                if (connectionsState.requests.isNotEmpty()) {
+                    RequestsBadgeButton(count = connectionsState.requests.size, onClick = onRequestsClick)
+                }
                 Surface(
                     onClick = onConnectClick,
                     shape = RoundedCornerShape(14.dp),
@@ -343,6 +407,7 @@ fun HomeScreen(
                     Box(contentAlignment = Alignment.Center) {
                         Text("+", color = fp.addFg, fontSize = 24.sp, fontWeight = FontWeight.Bold)
                     }
+                }
                 }
             }
 
@@ -374,14 +439,21 @@ fun HomeScreen(
             if (onlinePeers.isNotEmpty()) {
                 item { FriendsSectionLabel("Active now") }
                 items(items = onlinePeers, key = { peer -> peer.id }, contentType = { "friend" }) { peer ->
-                    FriendCard(peer = peer, status = peerStatuses[peer.id], onClick = { onPeerClick(peer) })
+                    FriendCard(peer = peer, status = peerStatuses[peer.id], onClick = { onPeerClick(peer) }, trailing = { friendButton(peer) })
                     Spacer(modifier = Modifier.height(10.dp))
                 }
             }
             if (offlinePeers.isNotEmpty()) {
                 item { FriendsSectionLabel("Inactive") }
                 items(items = offlinePeers, key = { peer -> peer.id }, contentType = { "friend" }) { peer ->
-                    FriendCard(peer = peer, status = peerStatuses[peer.id], onClick = { onPeerClick(peer) })
+                    FriendCard(peer = peer, status = peerStatuses[peer.id], onClick = { onPeerClick(peer) }, trailing = { friendButton(peer) })
+                    Spacer(modifier = Modifier.height(10.dp))
+                }
+            }
+            if (notConnectedPeers.isNotEmpty()) {
+                item { FriendsSectionLabel("Not connected") }
+                items(items = notConnectedPeers, key = { peer -> peer.id }, contentType = { "friend" }) { peer ->
+                    FriendCard(peer = peer, status = null, onClick = { onPeerClick(peer) }, trailing = { friendButton(peer) })
                     Spacer(modifier = Modifier.height(10.dp))
                 }
             }
@@ -418,6 +490,15 @@ fun HomeScreen(
                 Text("Delete Account", color = MaterialTheme.colorScheme.error)
             }
         }
+    }
+
+    SnackbarHost(
+        hostState = snackbarHostState,
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .navigationBarsPadding()
+            .padding(16.dp)
+    )
     }
 
 }
@@ -477,12 +558,17 @@ private fun FriendsSectionLabel(text: String) {
 private fun FriendCard(
     peer: PeerInfo,
     status: PeerLiveStatus?,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    trailing: @Composable () -> Unit = {},
 ) {
     val fp = friendsPalette()
-    val isOnline = status?.isUserActive == true
+    // Not connected: never show their activity, only who they are and the Connect button
+    val connected = peer.isConnected
+    val isOnline = connected && status?.isUserActive == true
+    val notConnectedLine = if (!connected) disconnectedStatusLine(peer) else ""
 
     val statusLine = when {
+        !connected -> notConnectedLine
         status == null -> "Checking…"
         isOnline && status.isActive && !status.isLocked -> "Walking · phone in use"
         isOnline && status.isActive -> "Walking"
@@ -540,13 +626,14 @@ private fun FriendCard(
                                 .clip(CircleShape)
                                 .background(
                                     when {
+                                        !connected -> fp.checkingDot
                                         status == null -> fp.checkingDot
                                         isOnline -> fp.onlineDot
                                         else -> fp.offlineDot
                                     }
                                 )
                                 .border(3.dp, fp.card, CircleShape)
-                                .semantics { contentDescription = if (isOnline) "Active" else "Inactive" }
+                                .semantics { contentDescription = if (!connected) "Not connected" else if (isOnline) "Active" else "Inactive" }
                         )
                     }
                 }
@@ -560,12 +647,17 @@ private fun FriendCard(
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = when {
+                            !connected && peer.status == PeerConnectionStatus.REQUEST_RECEIVED -> fp.onlineText
+                            !connected -> fp.muted
                             status == null -> fp.muted
                             isOnline -> fp.onlineText
                             else -> fp.offlineText
                         }
                     )
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
+                trailing()
             }
 
         }

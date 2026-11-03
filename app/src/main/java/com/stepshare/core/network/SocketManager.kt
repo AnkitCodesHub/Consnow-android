@@ -11,6 +11,9 @@ import java.time.Instant
 import com.Consnow.core.common.ActivityEventBus
 import com.Consnow.core.common.PeerUnlockEvent
 import com.Consnow.core.common.PeerLockEvent
+import com.Consnow.core.common.ConnectionChangedEvent
+import com.Consnow.core.common.ConnectionEventBus
+import com.Consnow.features.steps.data.cache.PeerProfileCache
 
 class SocketManager(
     private val baseUrl: String,
@@ -71,6 +74,27 @@ class SocketManager(
                     scope.launch { ActivityEventBus.emit(PeerLockEvent(userId, lockedAtMs)) }
                 } catch (e: Exception) {
                     Log.e(TAG, "peer_locked parse error: ${e.message}")
+                }
+            }
+
+            // Emitted by server when a friend's connection changes (either side).
+            // Payload: { peerId, type, requestId?, peerName? }
+            // type: connected | disconnected | request_sent | request_received |
+            //       request_accepted | request_declined | request_cancelled
+            socket?.on("connection_changed") { args ->
+                try {
+                    val data = args[0] as JSONObject
+                    val event = ConnectionChangedEvent(
+                        peerId = data.getString("peerId"),
+                        type = data.getString("type"),
+                        requestId = data.optString("requestId").takeIf { it.isNotEmpty() && it != "null" },
+                        peerName = data.optString("peerName").takeIf { it.isNotEmpty() && it != "null" },
+                    )
+                    // Consent: wipe the friend's cached data at once, even if no screen is open
+                    if (event.type == "disconnected") PeerProfileCache.remove(event.peerId)
+                    ConnectionEventBus.tryEmit(event)
+                } catch (e: Exception) {
+                    Log.e(TAG, "connection_changed parse error: ${e.message}")
                 }
             }
 

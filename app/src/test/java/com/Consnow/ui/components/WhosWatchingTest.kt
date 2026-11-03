@@ -55,4 +55,18 @@ class WhosWatchingTest {
         assertTrue(cardScale(pressed = true, held = true) > 1f)
         assertTrue(cardScale(pressed = false, held = true) > 1f)
     }
+
+    @Test
+    fun `only the first name is shown`() {
+        assertEquals("Sangita", firstName("Sangita Pandey"))
+        assertEquals("Ravi", firstName("  Ravi   Kumar  "))
+        assertEquals("Ankit", firstName("Ankit"))
+        assertEquals("Mary", firstName("Mary Jane Watson"))
+    }
+
+    @Test
+    fun `blank name gives an empty first name`() {
+        assertEquals("", firstName(""))
+        assertEquals("", firstName("   "))
+    }
 }

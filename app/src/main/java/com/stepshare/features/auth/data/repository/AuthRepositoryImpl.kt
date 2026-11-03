@@ -79,7 +79,13 @@ class AuthRepositoryImpl(
     }
 
     override suspend fun logout() {
+        // Stop connect-request pushes reaching this phone for the signed-out account (best effort)
+        kotlinx.coroutines.withTimeoutOrNull(3_000) {
+            runCatching { apiService.registerPushToken(com.Consnow.core.network.dto.FcmTokenRequest(null)) }
+        }
         tokenManager.clearSession()
+        // Friends list cache: the next account on this phone must not see this one's friends
+        context.getSharedPreferences("connections_cache", android.content.Context.MODE_PRIVATE).edit().clear().apply()
         PeerProfileCache.clear() // next account on this phone must not see old friends' data
         FirebaseAnalytics.getInstance(context).setUserId(null)
     }

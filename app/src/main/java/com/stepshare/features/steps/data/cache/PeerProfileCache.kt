@@ -85,6 +85,14 @@ object PeerProfileCache {
             )
         }
 
+    /**
+     * Forget everything about one friend (steps, lock state, last active).
+     * Called the moment either side disconnects, so nothing can be shown from cache.
+     */
+    fun remove(peerId: String) {
+        if (memory.remove(peerId) != null) persist()
+    }
+
     /** Call on logout so the next account on this phone never sees the old friends' data. */
     fun clear() {
         memory.clear()

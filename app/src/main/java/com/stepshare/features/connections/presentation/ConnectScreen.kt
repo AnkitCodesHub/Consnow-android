@@ -24,6 +24,7 @@ fun ConnectScreen(
     var code by remember { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
 
+    Box(Modifier.fillMaxSize()) {
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -89,7 +90,7 @@ fun ConnectScreen(
 
         if (state.connectSuccess) {
             Spacer(Modifier.height(12.dp))
-            Text(text = "Connected!", color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyLarge)
+            Text(text = state.connectSuccessText, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodyLarge)
         }
 
         Spacer(Modifier.height(24.dp))
@@ -108,5 +109,8 @@ fun ConnectScreen(
         }
 
         Spacer(Modifier.weight(1f))
+    }
+        // One-time notice (shows once for a few seconds, then never again)
+        ViewsNotice(modifier = Modifier.align(Alignment.TopCenter).padding(top = 64.dp, start = 24.dp, end = 24.dp))
     }
 }

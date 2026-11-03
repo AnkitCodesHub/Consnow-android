@@ -60,6 +60,8 @@ class PeerStatusesViewModel(
         if (peerIds == trackedIds && pollJob?.isActive == true) return
         trackedIds = peerIds
         pollJob?.cancel()
+        // Forget friends that are no longer connected, so nothing stale can be drawn for them
+        _statuses.update { current -> current.filterKeys { it in peerIds } }
         if (peerIds.isEmpty()) return
         pollJob = viewModelScope.launch {
             while (true) {

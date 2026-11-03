@@ -40,6 +40,20 @@
             android:foregroundServiceType="health"
             android:exported="false" />
 
+        <!-- Connect-request push notifications -->
+        <service
+            android:name=".features.connections.push.ConsnowMessagingService"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.google.firebase.MESSAGING_EVENT" />
+            </intent-filter>
+        </service>
+
+        <!-- Accept / Decline buttons on the notification -->
+        <receiver
+            android:name=".features.connections.push.ConnectionActionReceiver"
+            android:exported="false" />
+
         <receiver
             android:name=".features.steps.data.sensor.BootReceiver"
             android:exported="true">

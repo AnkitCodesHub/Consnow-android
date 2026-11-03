@@ -3,7 +3,9 @@
 //register(body)               →  POST   /auth/register
 //login(body)                  →  POST   /auth/login
 //createConnection(body)       →  POST   /connections
-//getConnections()             →  GET    /connections
+//getConnections()             →  GET    /connections?include=disconnected
+//disconnect / undo / request  →  POST   /connections/{peerId}/disconnect | undo-disconnect | request
+//accept / decline / cancel    →  POST   /connections/requests/{id}/accept | decline, DELETE /connections/requests/{id}
 //syncSteps(body)              →  PUT    /steps/sync
 //getMySteps(date)             →  GET    /steps/me?date=2026-10-04
 //getPeerSteps(userId, date)   →  GET    /steps/user/abc123?date=2026-10-04
@@ -32,8 +34,34 @@ interface ApiService {
     @POST("connections")
     suspend fun createConnection(@Body body: CreateConnectionRequest): Response<ConnectionResponse>
 
+    // include = "disconnected" also returns disconnected friends with their row state
     @GET("connections")
-    suspend fun getConnections(): Response<List<ConnectionResponse>>
+    suspend fun getConnections(@Query("include") include: String? = "disconnected"): Response<List<ConnectionResponse>>
+
+    @POST("connections/{peerId}/disconnect")
+    suspend fun disconnect(@Path("peerId") peerId: String): Response<ConnectionActionResponse>
+
+    @POST("connections/{peerId}/undo-disconnect")
+    suspend fun undoDisconnect(@Path("peerId") peerId: String): Response<ConnectionActionResponse>
+
+    @POST("connections/{peerId}/request")
+    suspend fun requestConnect(@Path("peerId") peerId: String): Response<ConnectionActionResponse>
+
+    @GET("connections/requests")
+    suspend fun getIncomingRequests(): Response<List<IncomingRequestResponse>>
+
+    @POST("connections/requests/{id}/accept")
+    suspend fun acceptRequest(@Path("id") requestId: String): Response<ConnectionResponse>
+
+    @POST("connections/requests/{id}/decline")
+    suspend fun declineRequest(@Path("id") requestId: String): Response<Unit>
+
+    @DELETE("connections/requests/{id}")
+    suspend fun cancelRequest(@Path("id") requestId: String): Response<Unit>
+
+    // Push notifications
+    @PUT("notifications/token")
+    suspend fun registerPushToken(@Body body: FcmTokenRequest): Response<Unit>
 
     // Steps
     @PUT("steps/sync")
