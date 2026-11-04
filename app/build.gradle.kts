@@ -13,8 +13,8 @@ android {
         applicationId = "com.Consnow"
         minSdk = 26
         targetSdk = 36
-        versionCode = 10
-        versionName = "1.6.0"
+        versionCode = 11
+        versionName = "1.6.1"
         buildConfigField("String", "API_BASE_URL", "\"https://consnow-backend-production.up.railway.app/\"")
     }
 
@@ -37,8 +37,11 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = true
-            isShrinkResources = true
+            // HOTFIX 1.6.1: R8 is off again. With it on (1.6.0) every server call failed in the
+            // Play build ("Something went wrong" at login). Turn back on only after testing a
+            // signed release APK with the rules in proguard-rules.pro (Google deadline: Feb 2027).
+            isMinifyEnabled = false
+            isShrinkResources = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"

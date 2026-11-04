@@ -192,14 +192,20 @@ class StepsViewModel(
                 val app = application as ConsnowApp
                 val response = app.appContainer.apiService.deleteAccount()
                 if (response.isSuccessful) {
-                    // Clear local token and data
+                    // Clear local data first, then the token (which sends the app to login).
+                    // Room refuses clearAllTables() on the main thread: it used to throw here,
+                    // leaving the deleted account's steps on the phone.
+                    kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                        app.appContainer.database.clearAllTables()
+                    }
+                    com.Consnow.features.steps.data.cache.PeerProfileCache.clear()
                     tokenManager.clearSession()
-                    app.appContainer.database.clearAllTables()
                     onSuccess()
                 } else {
                     onError()
                 }
             } catch (e: Exception) {
+                android.util.Log.e("ConsnowAuth", "delete account failed", e)
                 onError()
             }
         }

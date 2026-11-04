@@ -24,7 +24,7 @@ class AuthRepositoryImpl(
 
     override suspend fun register(name: String, email: String, password: String): Result<Unit> {
         return try {
-            val response = apiService.register(RegisterRequest(name, email, password))
+            val response = apiService.register(RegisterRequest(name.trim(), email.trim(), password))
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
                 // Before saving the session: the step service merges today's server count once
@@ -45,13 +45,15 @@ class AuthRepositoryImpl(
                 Result.Error(response.errorBody()?.string() ?: "Registration failed", response.code())
             }
         } catch (e: Exception) {
+            android.util.Log.e("ConsnowAuth", "register failed", e)
             Result.Error(e.toFriendlyMessage())
         }
     }
 
     override suspend fun login(email: String, password: String): Result<Unit> {
         return try {
-            val response = apiService.login(LoginRequest(email, password))
+            // Samsung's keyboard adds a space after an autocompleted email; the server rejects it
+            val response = apiService.login(LoginRequest(email.trim(), password))
             if (response.isSuccessful && response.body() != null) {
                 val body = response.body()!!
                 // Before saving the session: the step service merges today's server count once
@@ -74,6 +76,7 @@ class AuthRepositoryImpl(
                 Result.Error(response.errorBody()?.string() ?: "Login failed", response.code())
             }
         } catch (e: Exception) {
+            android.util.Log.e("ConsnowAuth", "login failed", e)
             Result.Error(e.toFriendlyMessage())
         }
     }
