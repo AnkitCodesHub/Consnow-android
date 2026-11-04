@@ -44,6 +44,14 @@ class StepCounterService : Service(), SensorEventListener {
     private var lastSavedCount: Int = 0
     private val mergeRunning = java.util.concurrent.atomic.AtomicBoolean(false)
 
+    // Android's reboot counter. It can't change while this process is alive (a reboot ends
+    // it), so it is read once. null if the phone doesn't provide it.
+    private val bootCount: Int? by lazy {
+        try {
+            android.provider.Settings.Global.getInt(contentResolver, android.provider.Settings.Global.BOOT_COUNT)
+        } catch (_: Exception) { null }
+    }
+
     private var lastStepAt: Long = 0L
     // Same moment on the trusted (server-corrected) clock: this is what gets stored and sent
     private var lastStepTrustedAt: Long = 0L
@@ -81,6 +89,9 @@ class StepCounterService : Service(), SensorEventListener {
         private const val KEY_FRESH = "fresh_since_wipe"
         // Set at login; cleared once today's server count has been merged in
         private const val KEY_MERGE_PENDING = "server_merge_pending"
+        // Boot counter and time of the last sensor reading (see CounterState)
+        private const val KEY_BOOT_COUNT = "sensor_boot_count"
+        private const val KEY_LAST_READING_AT = "last_reading_at"
         const val SYNC_INTERVAL_MS = 1_000L
         const val SYNC_DEBOUNCE_MS = 1_000L
         // 15s of no steps = inactive (was 60s; reduced so friends see
@@ -146,6 +157,8 @@ class StepCounterService : Service(), SensorEventListener {
         }
         // Brings in today's server count once after a login (no-op otherwise)
         runServerMergeIfPending()
+        // Phones updated from an older version: give the saved count an owner so it syncs
+        claimOwnerIfMissing()
 
         // Connect WebSocket with the CURRENT JWT and reconnect whenever it changes.
         // Before, the socket kept the token it started with: once that expired the
@@ -288,6 +301,7 @@ class StepCounterService : Service(), SensorEventListener {
                     checkAndResetForNewDay()
                     // Login merge still waiting (e.g. no internet at login): try again
                     runServerMergeIfPending()
+                    claimOwnerIfMissing()
                     // Renews the JWT once a day while online, so active users never hit expiry
                     app.appContainer.authRepository.refreshTokenIfStale()
                     val result = app.appContainer.stepsRepository.syncPendingToServer(isCurrentlyActive)
@@ -341,7 +355,9 @@ class StepCounterService : Service(), SensorEventListener {
         isCurrentlyActive = true
 
         // New day, phone reboot and future-date repair are all handled in StepCounterLogic
-        counter = StepCounterLogic.onReading(counter, event.values[0], TrustedClock.today())
+        counter = StepCounterLogic.onReading(
+            counter, event.values[0], TrustedClock.today(), bootCount, System.currentTimeMillis()
+        )
         saveState()
 
         if (counter.lastCount != lastSavedCount) {
@@ -418,6 +434,8 @@ class StepCounterService : Service(), SensorEventListener {
             // older app version has a saved day but no flag yet, so it is not fresh.
             freshSinceWipe = if (prefs.contains(KEY_FRESH)) prefs.getBoolean(KEY_FRESH, false)
                              else savedDate == null,
+            bootCount = if (prefs.contains(KEY_BOOT_COUNT)) prefs.getInt(KEY_BOOT_COUNT, 0) else null,
+            lastReadingAt = prefs.getLong(KEY_LAST_READING_AT, 0L),
         )
     }
 
@@ -431,8 +449,38 @@ class StepCounterService : Service(), SensorEventListener {
             putFloat(KEY_LAST_TOTAL, c.lastTotal)
             putInt(KEY_LAST_COUNT, c.lastCount)
             putBoolean(KEY_FRESH, c.freshSinceWipe)
+            if (c.bootCount != null) putInt(KEY_BOOT_COUNT, c.bootCount) else remove(KEY_BOOT_COUNT)
+            putLong(KEY_LAST_READING_AT, c.lastReadingAt)
             if (lastStepTrustedAt > 0) putLong(KEY_LAST_STEP_AT, lastStepTrustedAt)
         }.apply()
+    }
+
+    /**
+     * Phones updated from a version before count owners existed have a saved count with no
+     * owner, and only a login set one. persistSteps skips ownerless counts, so those users'
+     * steps were never saved or synced until they logged out and back in. Claims the count for
+     * the logged-in account when no login merge is pending (the merge claims it otherwise).
+     */
+    private fun claimOwnerIfMissing() {
+        if (counter.owner != null || isServerMergePending(this)) return
+        serviceScope.launch {
+            try {
+                val userId = (application as ConsnowApp).appContainer.tokenManager.getUserId()
+                    ?: return@launch
+                val claimed = withContext(Dispatchers.Main) {
+                    if (counter.owner != null || isServerMergePending(this@StepCounterService)) {
+                        return@withContext null
+                    }
+                    counter = StepCounterLogic.claimFor(counter, userId)
+                    saveState()
+                    Log.d("StepSync", "Claimed ownerless count for logged-in user, count=${counter.lastCount}")
+                    counter
+                } ?: return@launch
+                if (claimed.lastCount > 0) persistSteps(claimed)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {}
+        }
     }
 
     /**

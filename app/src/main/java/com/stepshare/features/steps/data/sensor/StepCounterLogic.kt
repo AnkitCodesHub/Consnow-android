@@ -20,17 +20,35 @@ data class CounterState(
     // Counting started on a phone with no saved data (reinstall / cleared data / another
     // account): the server's count must be ADDED to it. Otherwise the higher one wins.
     val freshSinceWipe: Boolean = false,
+    // Android's reboot counter (Settings.Global.BOOT_COUNT) when lastTotal was read, null = unknown.
+    // Tells a real reboot apart from a sensor that briefly reports a low value without one.
+    val bootCount: Int? = null,
+    // Wall-clock ms of the last reading, used to reject impossible jumps. 0 = unknown.
+    val lastReadingAt: Long = 0L,
 )
 
 object StepCounterLogic {
 
-    /** A new reading from the step sensor. */
-    fun onReading(state: CounterState, total: Float, today: String): CounterState {
+    // More than anyone can walk or run, plus room for readings the sensor delivers in a batch
+    const val MAX_STEPS_PER_SECOND = 5
+    const val JUMP_SLACK_STEPS = 500
+
+    /**
+     * A new reading from the step sensor.
+     * [boot] = current Settings.Global.BOOT_COUNT (null if unknown), [nowMs] = wall-clock ms (0 if unknown).
+     */
+    fun onReading(
+        state: CounterState,
+        total: Float,
+        today: String,
+        boot: Int? = null,
+        nowMs: Long = 0L,
+    ): CounterState {
         val d = state.date
         val dated = if (d == null) {
             state.copy(date = today)
         } else if (d < today) {
-            return finish(newDay(state, today, initial = total), total)
+            return finish(newDay(state, today, initial = total), total, boot, nowMs)
         } else if (d > today) {
             // Saved date is in the future: the clock was set ahead earlier. These steps were
             // really walked today, so they stay on today.
@@ -38,13 +56,36 @@ object StepCounterLogic {
         } else {
             state
         }
-        val rebased = if (dated.lastTotal >= 0f && total < dated.lastTotal) {
-            // Sensor went backwards = phone rebooted (it restarts at 0). Keep today's steps.
+        // With the boot counter known, only a real reboot counts as one. Without it, fall back
+        // to "the sensor went backwards".
+        val rebooted = if (boot != null && dated.bootCount != null) boot != dated.bootCount
+                       else total < dated.lastTotal
+        val rebased = if (dated.lastTotal >= 0f && rebooted) {
+            // Phone rebooted (the sensor restarts at 0). Keep today's steps.
             dated.copy(initial = 0f, accumulated = dated.lastCount)
+        } else if (dated.lastTotal >= 0f && total < dated.lastTotal) {
+            // Lower value but no reboot: a sensor glitch (some phones send one when the service
+            // restarts). Ignore it. Treating it as a reboot set the baseline to 0, so the next
+            // normal reading added every step since boot to today (millions of steps).
+            return dated
         } else {
             dated
         }
-        return finish(rebased, total)
+        return guardJump(dated, finish(rebased, total, boot, nowMs), total, nowMs)
+    }
+
+    /**
+     * Second line of defence: if a reading raises today's count by more than anyone could
+     * walk since the previous reading, it is not counted. Today's count stays as it was and
+     * counting continues from this reading.
+     */
+    private fun guardJump(prev: CounterState, next: CounterState, total: Float, nowMs: Long): CounterState {
+        if (nowMs <= 0L || prev.lastReadingAt <= 0L) return next // no times to judge by
+        val gained = (next.lastCount - prev.lastCount).toLong()
+        val seconds = (nowMs - prev.lastReadingAt).coerceAtLeast(0L) / 1000
+        val allowed = seconds * MAX_STEPS_PER_SECOND + JUMP_SLACK_STEPS
+        if (gained <= allowed) return next
+        return next.copy(initial = total, accumulated = prev.lastCount, lastCount = prev.lastCount)
     }
 
     /** Date check while no steps arrive (midnight passed while the phone was still). */
@@ -69,6 +110,8 @@ object StepCounterLogic {
             lastTotal = state.lastTotal,
             lastCount = 0,
             freshSinceWipe = true,
+            bootCount = state.bootCount,
+            lastReadingAt = state.lastReadingAt,
         )
     }
 
@@ -101,11 +144,19 @@ object StepCounterLogic {
         lastTotal = s.lastTotal,
         lastCount = 0,
         freshSinceWipe = false,
+        bootCount = s.bootCount,
+        lastReadingAt = s.lastReadingAt,
     )
 
-    private fun finish(s: CounterState, total: Float): CounterState {
+    private fun finish(s: CounterState, total: Float, boot: Int?, nowMs: Long): CounterState {
         val initial = s.initial ?: total
         val count = (total - initial).toInt().coerceAtLeast(0) + s.accumulated
-        return s.copy(initial = initial, lastTotal = total, lastCount = count)
+        return s.copy(
+            initial = initial,
+            lastTotal = total,
+            lastCount = count,
+            bootCount = boot ?: s.bootCount,
+            lastReadingAt = if (nowMs > 0L) nowMs else s.lastReadingAt,
+        )
     }
 }

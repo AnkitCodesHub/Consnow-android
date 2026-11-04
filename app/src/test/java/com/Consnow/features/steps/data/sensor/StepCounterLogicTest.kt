@@ -111,4 +111,43 @@ class StepCounterLogicTest {
         s = s.read(9004, d2); assertEquals(0, s.lastCount)
         s = s.read(9010, d2); assertEquals(6, s.lastCount)
     }
+
+    // ── sensor glitches (readings with boot counter and time, as the service sends them) ──
+
+    private val t0 = 1_000_000_000L
+    private fun CounterState.at(total: Int, boot: Int?, ms: Long, day: String = d1) =
+        StepCounterLogic.onReading(this, total.toFloat(), day, boot, ms)
+
+    @Test fun `low reading without a reboot is ignored`() {
+        // phone booted weeks ago, sensor says 330000 since boot
+        var s = CounterState(owner = "me").at(326_000, 7, t0).at(330_000, 7, t0 + 3_600_000) // 4000
+        s = s.at(0, 7, t0 + 3_601_000); assertEquals(4000, s.lastCount)          // glitch
+        s = s.at(330_003, 7, t0 + 3_602_000); assertEquals(4003, s.lastCount)     // not +330000
+    }
+
+    @Test fun `real reboot is detected by the boot counter`() {
+        var s = CounterState(owner = "me").at(1000, 7, t0).at(5000, 7, t0 + 3_600_000) // 4000
+        s = s.at(10, 8, t0 + 3_700_000); assertEquals(4010, s.lastCount)
+        s = s.at(20, 8, t0 + 3_710_000); assertEquals(4020, s.lastCount)
+    }
+
+    @Test fun `impossible jump is not counted when the boot counter is unknown`() {
+        var s = CounterState(owner = "me").at(1000, null, t0).at(1100, null, t0 + 100_000) // 100
+        s = s.at(0, null, t0 + 101_000); assertEquals(100, s.lastCount)           // looks like a reboot
+        s = s.at(330_000, null, t0 + 106_000); assertEquals(100, s.lastCount)     // jump rejected
+        s = s.at(330_010, null, t0 + 110_000); assertEquals(110, s.lastCount)     // counting continues
+    }
+
+    @Test fun `big but possible gain after a long gap is kept`() {
+        // service was killed for 3 hours while the user walked 12000 steps
+        val s = CounterState(owner = "me").at(1000, 7, t0).at(13_000, 7, t0 + 3 * 3_600_000L)
+        assertEquals(12_000, s.lastCount)
+    }
+
+    @Test fun `new day keeps the boot counter so a glitch right after midnight is still caught`() {
+        var s = CounterState(owner = "me").at(300_000, 7, t0).at(309_000, 7, t0 + 3_600_000) // 9000
+        s = s.at(309_010, 7, t0 + 3_700_000, d2); assertEquals(0, s.lastCount)
+        s = s.at(0, 7, t0 + 3_701_000, d2); assertEquals(0, s.lastCount)
+        s = s.at(309_015, 7, t0 + 3_702_000, d2); assertEquals(5, s.lastCount)
+    }
 }
