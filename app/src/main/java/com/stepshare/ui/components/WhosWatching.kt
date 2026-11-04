@@ -151,18 +151,19 @@ fun WhosWatchingPopup(
     val cardWidth = (LocalConfiguration.current.screenWidthDp / 2).dp
 
     Popup(
-        alignment = Alignment.TopEnd,
-        offset = IntOffset(x = -24, y = 96),
+        alignment = Alignment.TopStart, // list opens on the left
+        offset = IntOffset(x = 24, y = 96),
         properties = PopupProperties(focusable = false), // must not steal the held finger
     ) {
         AnimatedVisibility(
             visibleState = visible,
-            enter = slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { it / 2 } +
+            // Slides in from and out to the left, growing from its top-left corner
+            enter = slideInHorizontally(tween(260, easing = FastOutSlowInEasing)) { -it / 2 } +
                 fadeIn(tween(180)) +
-                scaleIn(tween(260, easing = FastOutSlowInEasing), initialScale = 0.82f, transformOrigin = TransformOrigin(1f, 0f)),
-            exit = slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { it / 2 } +
+                scaleIn(tween(260, easing = FastOutSlowInEasing), initialScale = 0.82f, transformOrigin = TransformOrigin(0f, 0f)),
+            exit = slideOutHorizontally(tween(180, easing = FastOutSlowInEasing)) { -it / 2 } +
                 fadeOut(tween(140)) +
-                scaleOut(tween(180), targetScale = 0.82f, transformOrigin = TransformOrigin(1f, 0f)),
+                scaleOut(tween(180), targetScale = 0.82f, transformOrigin = TransformOrigin(0f, 0f)),
         ) {
             Box(
                 modifier = Modifier

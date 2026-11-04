@@ -255,7 +255,7 @@ fun HomeScreen(
                     isActive = stepsState.isActive
                 )
                 // Static eye: shows this card can be held to see who viewed you
-                WatchersHintBadge(modifier = Modifier.align(Alignment.TopStart).padding(14.dp))
+                WatchersHintBadge(modifier = Modifier.align(Alignment.BottomEnd).padding(14.dp))
             }
             if (watchersMounted) {
                 WhosWatchingPopup(
