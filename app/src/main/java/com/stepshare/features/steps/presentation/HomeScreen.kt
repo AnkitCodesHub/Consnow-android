@@ -44,6 +44,7 @@ import com.Consnow.ui.components.MovementStatus
 import com.Consnow.ui.components.StepCard
 import com.Consnow.ui.components.ProfileWatcher
 import com.Consnow.ui.components.WhosWatchingPopup
+import com.Consnow.BuildConfig
 import com.Consnow.ui.components.onHoldFor
 import com.Consnow.ui.components.cardScale
 import com.Consnow.ui.components.WatchersHintBadge
@@ -489,6 +490,23 @@ fun HomeScreen(
             TextButton(onClick = { showDeleteDialog = true }) {
                 Text("Delete Account", color = MaterialTheme.colorScheme.error)
             }
+
+            // Opens the privacy policy in the browser
+            val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+            TextButton(onClick = {
+                runCatching { uriHandler.openUri("https://ankitcodeshub.github.io/consow-privacy/") }
+            }) {
+                Text("Privacy Policy", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+
+            // App version in small text at the very bottom (from versionName in
+            // app/build.gradle.kts, so it updates on its own)
+            Spacer(modifier = Modifier.height(16.dp))
+            Text(
+                text = "Consnow v${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
         }
     }
 
